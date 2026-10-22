@@ -1,0 +1,92 @@
+{
+  "name": "@ds-hu/dsh-auto-task-center",
+  "version": "0.1.0",
+  "description": "Task Center for the DeepSeek Harness Web GUI: create and manage Host-wide scheduled and webhook tasks from the right sidebar, delivered into a new session in any workspace or into an existing session, plus a 任务管理 agent preset.",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./tools": "./lib/tools.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-auto-task-center": "bin/task-center.mjs"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ds-hu/dsh-auto-task-center.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ds-hu/dsh-auto-task-center/issues"
+  },
+  "homepage": "https://github.com/ds-hu/dsh-auto-task-center#readme",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "cordis",
+    "scheduler",
+    "cron",
+    "webhook",
+    "automation",
+    "agent-preset"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml",
+        "./presets/task-center.patch.yml"
+      ]
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "license": "MIT",
+  "files": [
+    "bin",
+    "lib",
+    "presets",
+    "locale",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "README.zh-CN.md",
+    "CONTEXT.md",
+    "docs",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "test:unit": "node --test test/*.test.mjs",
+    "test:mount": "node test/mount-check.mjs",
+    "test:client": "node test/client-smoke.mjs",
+    "test:pack": "node test/package.mjs",
+    "test": "npm run test:unit && npm run test:mount && npm run test:client",
+    "check": "npm run lint && npm test && npm run test:pack",
+    "prepublishOnly": "npm run check"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.10.0",
+    "globals": "17.12.0"
+  }
+}

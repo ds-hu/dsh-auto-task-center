@@ -1,0 +1,14 @@
+dsh-auto-task-center
+Copyright (c) 2026 the dsh-auto-task-center authors
+
+This product is MIT-licensed (see LICENSE).
+
+Third-party material
+--------------------
+This package contains no third-party source code, fonts, or artwork. The
+icon (icon.svg) was drawn for this project.
+
+The package declares a single peer dependency on @deepseek-ai/cordis, which is
+supplied by the DeepSeek Harness installation. It has no runtime dependencies
+and imports no @deepseek-ai/* module at runtime; every Harness capability is
+reached through the Cordis context object.

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Task Center",
+    "description": "Scheduled and webhook tasks that open a session in any workspace or message an existing one, managed from the right sidebar."
+  }
+}

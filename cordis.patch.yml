@@ -1,0 +1,18 @@
+# The @ds-hu/dsh-auto-task-center bundle patch.
+#
+# One row: the Host half. `name` must be this package's name so the Loader
+# resolves the row (and therefore the code it mounts) from the profile's
+# node_modules; `id` must equal the `name` the Host half exports from
+# lib/index.js, so the row and the plugin are recognizably the same thing.
+# Both parity rules are guarded by test/mount-check.mjs.
+#
+# The plugin publishes no Cordis service, so it sits loose in the Host root
+# realm instead of an `isolate` group. Its data lives in
+# $DSH_HOME/task-center/ and nowhere else — see docs/TECHNICAL.md#uninstall.
+#
+# The second patch file, presets/task-center.patch.yml, declares the 任务管理
+# agent preset. Both are listed in package.json `dsh.bundle.patch`, in order.
+
+- insert:
+    - id: dsh-auto-task-center
+      name: '@ds-hu/dsh-auto-task-center'

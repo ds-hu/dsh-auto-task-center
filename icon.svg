@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Task Center">
+  <title>Task Center</title>
+  <rect x="5" y="7" width="40" height="47" rx="9" fill="none" stroke="#2E7DD1" stroke-width="4"/>
+  <path d="M14 21h22M14 31h16" stroke="#2E7DD1" stroke-width="4" stroke-linecap="round"/>
+  <path d="M14 41.5l4.5 4.5 9-9.5" fill="none" stroke="#2E7DD1" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="47" cy="46" r="14" fill="#2E7DD1"/>
+  <path d="M47 38.5V46l5.5 3.5" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
