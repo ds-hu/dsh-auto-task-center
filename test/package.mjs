@@ -62,6 +62,7 @@ check('the tarball carries every runtime file', () => {
     'lib/tool-definition.js',
     'lib/tools.js',
     'lib/version.js',
+    'lib/worktree.js',
     'lib/zoned.js',
     'bin/task-center.mjs',
     'presets/task-center.patch.yml',

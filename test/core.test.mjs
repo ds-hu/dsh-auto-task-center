@@ -5,6 +5,7 @@ import { countOccurrences, nextOccurrence, previewOccurrences } from '../lib/eng
 import { TaskInputError, normalizeDraft, sanitizeStoredTask, describeTrigger, describeTarget, withoutSecret } from '../lib/model.js';
 import { isValidTimeZone, nextWallClockAfter, wallClockToInstants, zoneOffsetMs } from '../lib/zoned.js';
 
+const BASE = Date.parse('2026-06-01T08:00:00Z');
 const iso = (ms) => (ms === undefined ? undefined : new Date(ms).toISOString());
 const at = (text) => Date.parse(text);
 
@@ -214,4 +215,73 @@ test('model: summaries and secret masking', () => {
   assert.equal(view.trigger.secret, '***');
   const plain = withoutSecret({ trigger: { kind: 'daily' } });
   assert.equal(plain.trigger.kind, 'daily');
+});
+
+test('model: a worktree modifier survives a round trip and stays tied to a workspace', () => {
+  const plain = normalizeDraft({
+    name: 'nightly',
+    trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+    target: { kind: 'newSession', workspaceId: 'ws-1', worktree: {} },
+    message: { text: 'run checks' },
+  }, { nowMs: BASE });
+  assert.deepEqual(plain.target, { kind: 'newSession', workspaceId: 'ws-1', worktree: {} }, 'an empty modifier means the default branch');
+
+  const pinned = normalizeDraft({
+    name: 'nightly',
+    trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+    target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: '  release/3.2  ' } },
+    message: { text: 'run checks' },
+  }, { nowMs: BASE });
+  assert.equal(pinned.target.worktree.base, 'release/3.2');
+
+  assert.throws(
+    () => normalizeDraft({
+      name: 'bad',
+      trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+      target: { kind: 'newSession', cwd: '/work/x', worktree: {} },
+      message: { text: 'body' },
+    }, { nowMs: BASE }),
+    (error) => error instanceof TaskInputError && error.code === 'target/worktree-cwd',
+  );
+  assert.throws(
+    () => normalizeDraft({
+      name: 'bad',
+      trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+      target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 7 } },
+      message: { text: 'body' },
+    }, { nowMs: BASE }),
+    (error) => error instanceof TaskInputError && error.code === 'target/worktree-base-invalid',
+  );
+});
+
+test('model: stored worktree targets are re-validated, not trusted', () => {
+  const base = {
+    id: 'task-11111111-2222-3333-4444-555555555555',
+    name: 'nightly',
+    enabled: true,
+    trigger: { kind: 'daily', time: '09:00:00', timeZone: 'UTC' },
+    message: { text: 'body' },
+    state: {},
+    history: [],
+    createdAt: new Date(BASE).toISOString(),
+    updatedAt: new Date(BASE).toISOString(),
+  };
+  const kept = sanitizeStoredTask({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 'main' } } });
+  assert.deepEqual(kept.target.worktree, { base: 'main' });
+  const stripped = sanitizeStoredTask({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: '' } } });
+  assert.deepEqual(stripped.target.worktree, {}, 'an empty base falls back to the default branch');
+  const orphan = sanitizeStoredTask({ ...base, target: { kind: 'newSession', cwd: '/work/x', worktree: { base: 'main' } } });
+  assert.equal(orphan.target.worktree, undefined, 'a directory target cannot carry a worktree');
+});
+
+test('model: the target summary names the worktree and its base', () => {
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', worktree: {} }),
+    'new session in ws-1 in a fresh worktree off the default branch',
+  );
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 'main' }, agentPreset: 'standard' }),
+    'new session in ws-1 in a fresh worktree off main (standard)',
+  );
+  assert.equal(describeTarget({ kind: 'newSession', workspaceId: 'ws-1' }), 'new session in ws-1');
 });

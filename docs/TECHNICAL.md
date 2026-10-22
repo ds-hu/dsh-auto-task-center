@@ -7,6 +7,7 @@ HTTP surface.
 - [Data model](#data-model)
 - [Scheduling](#scheduling)
 - [Delivery](#delivery)
+- [Worktree targets](#worktree-targets)
 - [HTTP API](#http-api)
 - [Webhook security](#webhook-security)
 - [The `task_center` tool](#the-task_center-tool)
@@ -72,8 +73,9 @@ A `Task` — everything the panel edits and everything a run needs:
 | `cron` | `expression`, `timeZone` | five-field cron |
 | `webhook` | `secret` | only when called; carries no schedule |
 
-`Target` is either `{ kind: 'newSession', workspaceId?, cwd?, agentPreset? }` or
-`{ kind: 'session', sessionId }`.
+`Target` is either `{ kind: 'newSession', workspaceId?, cwd?, agentPreset?, worktree? }` or
+`{ kind: 'session', sessionId }`. `worktree: { base? }` asks for a fresh git worktree per run and is only
+valid with a `workspaceId` — see [Worktree targets](#worktree-targets).
 
 `TaskState` is what the scheduler knows: `status` (`active` / `inactive` / `finished`), `nextAt`,
 `evaluatedThrough`, `lastRunAt`, `lastResult`, `consecutiveFailures`, `needsAttention`.
@@ -136,6 +138,52 @@ Slash commands work in delivered messages because `sessionController.prompt` sta
 `source: { kind: 'user', rpcId, clientTimeZone }` on the message it creates, and DSH's skill scanner only
 treats such a message as a user gesture. A message injected by other means would not trigger skills.
 
+## Worktree targets
+
+A new-session target can carry `worktree: { base? }`. Each **run** then gets its own git worktree and its
+own branch, so an agent never edits a checkout a person has open, and two runs never see each other's
+changes. There is exactly one mode: fresh per run. Reusing a worktree between runs would let run *n+1*
+inherit the uncommitted state of run *n*, which is the failure a worktree exists to prevent.
+
+The capability belongs to `dsh-better-workspaces`, which publishes no Cordis service — its only contract is
+its HTTP surface. `lib/worktree.js` drives it over loopback:
+
+| Call | Upstream route | Used for |
+|---|---|---|
+| presence | `GET /better-workspaces/api/worktree-workspaces` | `capabilities.worktrees`, cached 5 minutes |
+| branches | `GET …/detect?path=`, `GET …/branches?cwd=` | the base-branch select |
+| create | `POST …/worktrees` `{ cwd, intent: 'branch-off', base?, slug? }` | one worktree per run |
+
+Rules the code enforces:
+
+- **No fallback.** If the other plugin is absent, refuses or times out, the run fails with
+  `worktree-unavailable`. It is never downgraded to the repository checkout: silence must not turn a
+  worktree task into an edit of the main working copy.
+- **The base is a branch, not a commit.** A task pinned to `main` branches off whatever `main` is when it
+  fires.
+- **Slugs are ASCII only.** A non-ASCII task name produces an empty slug and the other plugin picks its own
+  mnemonic name, so we never hand git a branch name it would reject. `base` is capped at 200 characters.
+- **We never delete a worktree.** Its lifecycle belongs to the plugin that created it.
+- **The run record remembers.** `params.worktree: { path, branch }` is stored with the run, so the history
+  still says which branch a run produced after the directory is gone.
+
+Failure codes, all surfaced per run and by `needsAttention`:
+
+| Code | Meaning |
+|---|---|
+| `worktree-unavailable` | the other plugin is not mounted on this Host, or did not answer |
+| `worktree-not-git-root` | the workspace is not a git repository root |
+| `worktree-base-invalid` | the named base branch does not resolve |
+| `worktree-create-failed` | git refused the creation (conflict, permission, timeout) |
+
+`GET /task-center/api/worktree-options?workspaceId=` proxies the branch roster so the panel talks to a
+single origin. It answers `501` when no integration is mounted, `409` for a non-git workspace and `404` for
+a workspace that no longer exists.
+
+The panel renders the switch only when `capabilities.worktrees` is true. A stored task that already asks for
+a worktree keeps the switch — plus a warning — after the other plugin is removed, so the target can be
+repaired instead of leaving behind a task whose every run must fail.
+
 ## HTTP API
 
 Everything is served from the profile's own web server under `/task-center`, registered as one prefix
@@ -145,6 +193,7 @@ route. Mutating routes require a JSON content type and reject a foreign `Origin`
 |---|---|---|
 | `GET` | `/task-center/api/state` | tasks, workspaces, presets, capabilities, origin, version |
 | `GET` | `/task-center/api/sessions?q=&limit=` | session rows for the target picker |
+| `GET` | `/task-center/api/worktree-options?workspaceId=` | base branches, when the worktree plugin is present |
 | `POST` | `/task-center/api/preview` | next five runs for an unsaved trigger |
 | `POST` | `/task-center/api/tasks` | create |
 | `POST` | `/task-center/api/tasks/<id>` | update, guarded by `expectedUpdatedAt` |
@@ -259,7 +308,19 @@ npm test           # unit tests only
 | `test/scheduler.test.mjs` | arming, firing, missed runs, failure counting, DST |
 | `test/api.test.mjs` | every route against a real HTTP server, origin fence, rate limit, rotation |
 | `test/tool.test.mjs` | the tool contract, target defaults, secret redaction |
+| `test/worktree.test.mjs` | the other plugin's HTTP contract against a stand-in server, and the failure codes |
 | `test/lifecycle.test.mjs` | mount/dispose leaves the disk untouched; the CLI's purge guards |
 | `test/mount-check.mjs` | package shape, Loader row ids, preset drift against `standard` |
 | `test/client-smoke.mjs` | the browser bundle evaluated against a mock context, theme-only colours |
 | `test/package.mjs` | what `npm publish` would actually upload |
+
+`test/e2e/worktree.mjs` is a manual check, run against a live instance that mounts both this plugin
+and `dsh-better-workspaces`:
+
+```bash
+node test/e2e/worktree.mjs --origin http://127.0.0.1:3080 --repo /path/to/git/repo
+```
+
+It creates one webhook task, fires it twice, and asserts two distinct worktrees, two branches, two
+sessions whose `cwd` is inside them, and a history that names each branch. It is not part of `npm test`
+because it needs a profile that carries the optional plugin.

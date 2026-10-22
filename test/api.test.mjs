@@ -14,7 +14,7 @@ const BASE = Date.parse('2026-06-01T08:00:00Z');
  * Boot the HTTP surface against stubs and hand back a client.
  * @returns {Promise<{ origin: string, call: Function, store: any, close: Function, sessions: string[] }>} the harness.
  */
-async function boot() {
+async function boot({ worktrees } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'task-center-api-'));
   const store = createStore({ dir });
   store.load();
@@ -61,6 +61,7 @@ async function boot() {
     store,
     scheduler,
     ctx,
+    ...(worktrees === undefined ? {} : { worktrees }),
     origin: () => origin,
     version: '0.1.0',
     now: () => BASE,
@@ -320,6 +321,117 @@ test('api: a webhook task is the only kind that can rotate a secret', async () =
     const result = await harness.call(`/task-center/api/tasks/${id}/rotate-secret`, { method: 'POST', body: {} });
     assert.equal(result.status, 400);
     assert.equal(result.body.code, 'not-a-webhook');
+  } finally {
+    await harness.close();
+  }
+});
+
+/** A worktree client stub with instruments. */
+function stubWorktrees(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    present: true,
+    async probe() {
+      calls.push({ probe: true });
+      return { present: this.present };
+    },
+    async options(input) {
+      calls.push({ options: input });
+      if (overrides.optionsError !== undefined) throw overrides.optionsError;
+      return overrides.options ?? { ok: true, isGit: true, defaultBranch: 'main', branches: ['main', 'dev'] };
+    },
+    async create(input) {
+      calls.push({ create: input });
+      return { path: '/repo/wt', branch: 'wt-1', workspaceId: 'ws-wt' };
+    },
+  };
+}
+
+test('api: the worktree capability follows the other plugin', async () => {
+  const absent = await boot();
+  try {
+    const state = await absent.call('/task-center/api/state');
+    assert.equal(state.body.capabilities.worktrees, false, 'no client means no option');
+  } finally {
+    await absent.close();
+  }
+
+  const stub = stubWorktrees();
+  const present = await boot({ worktrees: stub });
+  try {
+    const state = await present.call('/task-center/api/state');
+    assert.equal(state.body.capabilities.worktrees, true);
+    stub.present = false;
+    const gone = await present.call('/task-center/api/state');
+    assert.equal(gone.body.capabilities.worktrees, false, 'the probe runs per state load');
+  } finally {
+    await present.close();
+  }
+});
+
+test('api: worktree options proxy the workspace repository', async () => {
+  const stub = stubWorktrees();
+  const harness = await boot({ worktrees: stub });
+  try {
+    const answer = await harness.call('/task-center/api/worktree-options?workspaceId=ws-1');
+    assert.equal(answer.status, 200);
+    assert.deepEqual(answer.body, { ok: true, defaultBranch: 'main', branches: ['main', 'dev'] });
+    assert.deepEqual(stub.calls.at(-1), { options: { repoPath: '/work/demo' } });
+
+    const missing = await harness.call('/task-center/api/worktree-options?workspaceId=nope');
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.code, 'workspace-missing');
+
+    const unnamed = await harness.call('/task-center/api/worktree-options');
+    assert.equal(unnamed.status, 400);
+    assert.equal(unnamed.body.code, 'workspace-required');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a non-git workspace refuses worktree options with a stable code', async () => {
+  const stub = stubWorktrees({ options: { ok: true, isGit: false, defaultBranch: null, branches: [] } });
+  const harness = await boot({ worktrees: stub });
+  try {
+    const answer = await harness.call('/task-center/api/worktree-options?workspaceId=ws-1');
+    assert.equal(answer.status, 409);
+    assert.equal(answer.body.code, 'worktree-not-git-root');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: an unreachable worktree plugin answers 503 on the options route', async () => {
+  const stub = stubWorktrees();
+  stub.options = async () => {
+    const error = new Error('better-workspaces did not answer');
+    error.name = 'WorktreeError';
+    error.code = 'worktree-unavailable';
+    throw error;
+  };
+  const harness = await boot({ worktrees: stub });
+  try {
+    const answer = await harness.call('/task-center/api/worktree-options?workspaceId=ws-1');
+    assert.equal(answer.status, 503);
+    assert.equal(answer.body.code, 'worktree-unavailable');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a worktree task can be created and stored', async () => {
+  const harness = await boot();
+  try {
+    const created = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({ target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 'main' } } }),
+    });
+    assert.equal(created.status, 200);
+    assert.deepEqual(created.body.task.target.worktree, { base: 'main' });
+    const stored = harness.store.get(created.body.task.id);
+    assert.deepEqual(stored.target.worktree, { base: 'main' });
   } finally {
     await harness.close();
   }

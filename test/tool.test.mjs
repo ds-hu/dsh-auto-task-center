@@ -174,3 +174,33 @@ test('tool: invalid arguments are rejected by the definition itself', async () =
     await harness.cleanup();
   }
 });
+
+test('tool: the schema exposes the optional worktree modifier', () => {
+  const target = TASK_CENTER_TOOL.parameters.properties.target;
+  assert.equal(target.properties.worktree.type, 'object');
+  assert.equal(target.properties.worktree.properties.base.type, 'string');
+  assert.match(target.description, /worktree/u);
+  assert.match(TASK_CENTER_TOOL.description, /target\.worktree/u);
+});
+
+test('tool: create accepts a worktree target and list names it', async () => {
+  const harness = await withRuntime();
+  try {
+    const created = await TASK_CENTER_TOOL.execute({
+      action: 'create',
+      name: 'nightly',
+      trigger: { kind: 'every', everySeconds: 3600 },
+      target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 'main' } },
+      message: { text: 'run the checks' },
+    }, exec());
+    assert.equal(created.ok, true);
+    const stored = harness.store.get(created.task.id);
+    assert.deepEqual(stored.target.worktree, { base: 'main' });
+
+    const listed = await TASK_CENTER_TOOL.execute({ action: 'list' }, exec());
+    assert.equal(listed.ok, true);
+    assert.match(JSON.stringify(listed), /fresh worktree off main/u);
+  } finally {
+    await harness.cleanup();
+  }
+});

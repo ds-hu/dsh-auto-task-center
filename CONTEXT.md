@@ -44,7 +44,7 @@ user-visible outcome is identical — nothing was delivered.
 Where a run delivers. Two kinds only:
 
 - **new session** — in a chosen workspace (by id, or by path when the id is gone), with a chosen agent
-  preset;
+  preset, optionally in a **fresh worktree**;
 - **existing session** — a session id that must still resolve when the run fires.
 
 A target that no longer resolves is a **failure**, not a silent no-op: the record says why, and the task
@@ -60,6 +60,15 @@ always replaced — with the body for a webhook run, with nothing for a timed ru
 
 **Goal mode** changes the delivery mechanism, not the message: the text is handed to `/goal` instead of
 being sent as a message, so the turn runs autonomously towards that objective.
+
+## Worktree target
+
+A new-session target that asks for a **fresh worktree per run**: DSH's `dsh-better-workspaces` plugin makes
+a directory and a branch for this run only, and the session opens there. **Base** is the branch it branches
+off — a name, resolved when the run fires, not a pinned commit.
+
+A worktree target that cannot be honoured is a **failure** (`worktree-unavailable`), never a fallback to the
+workspace checkout: the point of the target is that the agent does not edit what a person has open.
 
 ## Webhook
 

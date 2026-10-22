@@ -51,6 +51,25 @@
 消息内容完全由你写。它以普通用户消息的身份进入会话，所以斜杠指令照常生效：
 `/goal` 让这次触发变成自主目标，`/技能名` 加载对应技能。
 
+### 每次运行新建一个 worktree
+
+装好 [`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) 之后，
+投递目标还能选**新建 worktree**：每次触发都从你指定的基分支拉出一个新分支，在那个目录里干活，
+夜里跑的 Agent 不会碰你正开着的工作区。
+
+<p align="center">
+  <img src="docs/screenshots/10-worktree.png" alt="开启“每次运行新建 worktree”，并选择基分支" width="820">
+</p>
+
+跑两次就是两个分支，运行记录里写清楚了每次在哪干活：
+
+<p align="center">
+  <img src="docs/screenshots/11-worktree-history.png" alt="两次运行分别落在两个 worktree 里" width="700">
+</p>
+
+没装那个插件时，这个选项根本不会出现，其他投递方式一切照旧；已经选了 worktree 的任务会保留开关并给出提示，
+点一下就能改回普通工作区，不用去猜哪里坏了。
+
 ## Webhook 共用同一个端口
 
 每个 Webhook 任务都有自己的地址和密钥，复制走就能贴进 GitHub、CI 或者一行 curl。

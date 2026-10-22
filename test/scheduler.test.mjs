@@ -272,3 +272,169 @@ test('deliver: a vanished target session surfaces as target-missing', async () =
   const task = makeTask({ message: { text: 'x', goalMode: true } });
   await assert.rejects(() => deliver({ task, signal: AbortSignal.timeout(1000) }), /cannot open session/u);
 });
+
+test('scheduler: a run records the worktree it delivered into', async () => {
+  const store = await makeStore();
+  const deliverer = {
+    async deliver() {
+      return { sessionId: 'sess-9', worktree: { path: '/repo/wt-nightly', branch: 'nightly-2' } };
+    },
+  };
+  const task = makeTask();
+  task.state.nextAt = new Date(BASE).toISOString();
+  await store.put(task);
+
+  const scheduler = createScheduler({ store, deliverer, now: () => BASE });
+  await scheduler.tick();
+  await scheduler.stop();
+
+  const entry = store.get(task.id).history[0];
+  assert.equal(entry.code, 'delivered');
+  assert.deepEqual(entry.params.worktree, { path: '/repo/wt-nightly', branch: 'nightly-2' });
+  assert.match(entry.detail, /worktree nightly-2/u);
+  await store.close();
+});
+
+/** A Host context stub with a session controller and one workspace. */
+function stubContext(overrides = {}) {
+  const created = [];
+  const prompted = [];
+  const ctx = {
+    sessionController: {
+      async create(request) {
+        created.push(request);
+        return { sessionId: 'sess-wt' };
+      },
+      async prompt(request) {
+        prompted.push(request);
+      },
+      async resolveAgent() {
+        return { agent: {} };
+      },
+    },
+    get: (key) => (key === 'workspaceRegistry'
+      ? { list: () => [{ id: 'ws-1', path: '/repo' }] }
+      : undefined),
+    ...overrides.ctx,
+  };
+  return { ctx, created, prompted };
+}
+
+test('deliver: a worktree target creates the worktree, then the session inside it', async () => {
+  const { ctx, created, prompted } = stubContext();
+  const calls = [];
+  const worktrees = {
+    async probe() {
+      return { present: true };
+    },
+    async create(input) {
+      calls.push(input);
+      return { path: '/repo/wt-nightly', branch: 'nightly-3', workspaceId: 'ws-wt' };
+    },
+  };
+  const deliverer = createDeliverer({ ctx, worktrees });
+  const task = makeTask({
+    name: 'Nightly Tests',
+    target: { kind: 'newSession', workspaceId: 'ws-1', agentPreset: 'standard', worktree: { base: 'main' } },
+  });
+
+  const result = await deliverer.deliver({ task, signal: AbortSignal.timeout(5000) });
+
+  assert.deepEqual(calls, [{ repoPath: '/repo', base: 'main', slug: 'nightly-tests' }]);
+  assert.deepEqual(result, { sessionId: 'sess-wt', worktree: { path: '/repo/wt-nightly', branch: 'nightly-3' } });
+  assert.deepEqual(created, [{ workspaceId: 'ws-wt', agentPreset: 'standard' }], 'the session joins the registered worktree');
+  assert.equal(prompted.length, 1);
+  assert.equal(prompted[0].content[0].text, 'body');
+});
+
+test('deliver: without the workspace identity the session owns the worktree path', async () => {
+  const { ctx, created } = stubContext();
+  const worktrees = {
+    async probe() {
+      return { present: true };
+    },
+    async create() {
+      return { path: '/repo/wt-x', branch: 'x' };
+    },
+  };
+  const deliverer = createDeliverer({ ctx, worktrees });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', worktree: {} } });
+  await deliverer.deliver({ task, signal: AbortSignal.timeout(5000) });
+  assert.deepEqual(created, [{ cwd: '/repo/wt-x' }]);
+});
+
+test('deliver: an absent worktree plugin fails the run instead of using the checkout', async () => {
+  const { ctx, created, prompted } = stubContext();
+  const worktrees = {
+    async probe() {
+      return { present: false, reason: 'status 404' };
+    },
+    async create() {
+      throw new Error('must not be called');
+    },
+  };
+  const deliverer = createDeliverer({ ctx, worktrees });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', worktree: {} } });
+
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => {
+      assert.equal(error.name, 'DeliveryError');
+      assert.equal(error.code, 'worktree-unavailable');
+      assert.match(error.message, /not answering/u);
+      return true;
+    },
+  );
+  assert.equal(created.length, 0, 'no session was opened in the main checkout');
+  assert.equal(prompted.length, 0);
+});
+
+test('deliver: no worktree client at all is the same failure', async () => {
+  const { ctx, created } = stubContext();
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', worktree: {} } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'worktree-unavailable',
+  );
+  assert.equal(created.length, 0);
+});
+
+test('deliver: a vanished workspace is named, not guessed', async () => {
+  const { ctx } = stubContext();
+  const worktrees = {
+    async probe() {
+      return { present: true };
+    },
+    async create() {
+      throw new Error('must not be called');
+    },
+  };
+  const deliverer = createDeliverer({ ctx, worktrees });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-gone', worktree: {} } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'workspace-missing',
+  );
+});
+
+test('deliver: worktree refusals keep their code', async () => {
+  const { ctx } = stubContext();
+  const worktrees = {
+    async probe() {
+      return { present: true };
+    },
+    async create() {
+      const error = new Error('base did not resolve to a commit');
+      error.name = 'WorktreeError';
+      error.code = 'worktree-base-invalid';
+      throw error;
+    },
+  };
+  const deliverer = createDeliverer({ ctx, worktrees });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', worktree: { base: 'gone' } } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'worktree-base-invalid',
+  );
+});

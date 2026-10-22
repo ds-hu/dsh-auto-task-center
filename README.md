@@ -53,6 +53,26 @@ or into an **existing conversation**.
 The message is yours to write. Slash commands work in it, because DSH receives it as a normal user message:
 `/goal` turns the task into an autonomous goal run, and any `/skill-name` loads that skill.
 
+### Run it in a fresh worktree
+
+With [`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) installed, a task can
+deliver into a **fresh worktree** instead of the workspace itself: every run branches off the base you pick
+and works in its own directory, so a nightly job never touches the checkout you have open.
+
+<p align="center">
+  <img src="docs/screenshots/10-worktree.png" alt="Turning on a fresh worktree per run and picking a base branch" width="820">
+</p>
+
+Two runs, two branches. The history says where each run worked:
+
+<p align="center">
+  <img src="docs/screenshots/11-worktree-history.png" alt="Two runs, each delivered into its own worktree" width="700">
+</p>
+
+Without that plugin the option simply isn't offered, and every other target works as before. A task that
+already asked for a worktree keeps its switch and explains itself, so pointing it back at the workspace is
+one click instead of a hunt for what broke.
+
 ## Webhooks, on the same port
 
 Every webhook task gets a URL with its own secret — copy it into GitHub, your CI, or a shell one-liner.
