@@ -53,7 +53,7 @@
 
 ### 每次运行新建一个 worktree
 
-装好 [`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) 之后，
+装好 [`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces) 之后，
 投递目标还能选**新建 worktree**：每次触发都从你指定的基分支拉出一个新分支，在那个目录里干活，
 夜里跑的 Agent 不会碰你正开着的工作区。
 
@@ -118,7 +118,8 @@ dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 **任务管理**预设会出现在输入框的模式菜单里。
 
 唯一的可选搭档是 worktree：在同一个 profile 里再装上
-[`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces)，投递方式里就会多出
+[`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces)
+（`dsh plugin --profile web add github:ds-hu/dsh-better-workspaces`），投递方式里就会多出
 「每次运行新建 worktree」；不装的话一切照旧。
 
 ## 卸载

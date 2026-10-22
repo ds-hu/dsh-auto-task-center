@@ -55,9 +55,9 @@ The message is yours to write. Slash commands work in it, because DSH receives i
 
 ### Run it in a fresh worktree
 
-With [`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) installed, a task can
-deliver into a **fresh worktree** instead of the workspace itself: every run branches off the base you pick
-and works in its own directory, so a nightly job never touches the checkout you have open.
+With [`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces) installed, a task can deliver
+into a **fresh worktree** instead of the workspace itself: every run branches off the base you pick and works
+in its own directory, so a nightly job never touches the checkout you have open.
 
 <p align="center">
   <img src="docs/screenshots/10-worktree.png" alt="Turning on a fresh worktree per run and picking a base branch" width="820">
@@ -122,9 +122,10 @@ dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 Restart `dsh web`, open any session, and pick **Task Center** from the right sidebar's start page.
 The **任务管理** preset shows up in the composer's mode menu.
 
-Fresh worktrees are the one optional extra: install
-[`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) in the same profile and the
-delivery section grows a worktree switch. Nothing else changes if you don't.
+Fresh worktrees are the one optional extra: add
+[`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces) to the same profile
+(`dsh plugin --profile web add github:ds-hu/dsh-better-workspaces`) and the delivery section grows a worktree
+switch. Nothing else changes if you don't.
 
 ## Uninstall
 
