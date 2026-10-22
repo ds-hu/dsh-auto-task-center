@@ -122,6 +122,10 @@ dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 Restart `dsh web`, open any session, and pick **Task Center** from the right sidebar's start page.
 The **任务管理** preset shows up in the composer's mode menu.
 
+Fresh worktrees are the one optional extra: install
+[`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces) in the same profile and the
+delivery section grows a worktree switch. Nothing else changes if you don't.
+
 ## Uninstall
 
 Remove the plugin the same way you added it. It writes nothing outside `$DSH_HOME/task-center/`, and it

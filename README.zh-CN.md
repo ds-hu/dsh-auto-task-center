@@ -117,6 +117,10 @@ dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 重启 `dsh web`，打开任意会话，在右侧边栏的起始页里选 **Task Center**。
 **任务管理**预设会出现在输入框的模式菜单里。
 
+唯一的可选搭档是 worktree：在同一个 profile 里再装上
+[`dsh-better-workspaces`](https://www.npmjs.com/package/dsh-better-workspaces)，投递方式里就会多出
+「每次运行新建 worktree」；不装的话一切照旧。
+
 ## 卸载
 
 和安装一样，把插件移除即可。它只在 `$DSH_HOME/task-center/` 下写数据，不注册安装脚本，
