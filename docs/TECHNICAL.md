@@ -73,6 +73,13 @@ A `Task` — everything the panel edits and everything a run needs:
 | `weekly` | `time`, `timeZone`, `weekdays` (1–7) | on chosen ISO weekdays |
 | `cron` | `expression`, `timeZone` | five-field cron |
 | `webhook` | `secret` | only when called; carries no schedule |
+| `manual` | — | only when a person or an agent runs it; carries neither schedule nor address |
+
+The trigger names *what* causes a run; `lib/events.js` turns that into one event per firing. Three
+sources cover every way a run can start — `schedule`, `http`, `manual` — and each trigger kind maps to
+exactly one of them, so a task is still caused by exactly one thing. Running a scheduled task by hand
+is a `manual` event on a task whose trigger stays a schedule; the run record says `manual`, and the
+schedule is untouched. See [ADR 0009](adr/0009-one-source-per-task.md).
 
 `Target` is either
 `{ kind: 'newSession', workspaceId?, cwd?, agentPreset?, worktree?, model?, permission? }` or
@@ -94,9 +101,10 @@ a profile that renames a preset must not make stored tasks unloadable — see
 `TaskState` is what the scheduler knows: `status` (`active` / `inactive` / `finished`), `nextAt`,
 `evaluatedThrough`, `lastRunAt`, `lastResult`, `consecutiveFailures`, `needsAttention`.
 
-A `RunRecord` is `{ runId, at, result, code, detail, params?, sessionId? }`. `result` is one of
-`ok` / `failed` / `skipped` / `missed`; `code` is a stable machine value the client localises, so the
-text of `detail` is never parsed.
+A `RunRecord` is `{ runId, at, result, source?, code, detail, params?, sessionId? }`. `result` is one
+of `ok` / `failed` / `skipped` / `missed`; `source` is the event that caused the run
+(`schedule` / `http` / `manual`, absent on records written before events existed); `code` is a stable
+machine value the client localises, so the text of `detail` is never parsed.
 
 Writes are atomic: a temp file in the same directory, then `rename`. Reads that find a corrupt file
 move it aside as `tasks.json.corrupt-<timestamp>` and start empty, rather than crashing the profile.
@@ -104,7 +112,8 @@ move it aside as `tasks.json.corrupt-<timestamp>` and start empty, rather than c
 ## Scheduling
 
 `lib/engine.js` answers one question — *when does this trigger fire next after instant X* — for every
-kind except `webhook`, which has no schedule. `lib/zoned.js` does the wall-clock arithmetic with
+scheduled kind. `webhook` and `manual` have no clock at all: they wait for a request or a person, so
+they are *active* without ever having a `nextAt`, and the scheduler never arms for them. `lib/zoned.js` does the wall-clock arithmetic with
 `Intl.DateTimeFormat`, so time zones and daylight saving come from the platform's tz database rather
 than from a bundled copy.
 
@@ -117,8 +126,12 @@ The scheduler (`lib/scheduler.js`) keeps exactly one timer, armed for the earlie
 tick it:
 
 1. selects every enabled task whose `nextAt` has passed;
-2. delivers each one, recording `ok` or `failed`;
+2. delivers each one with a `schedule` event, recording `ok` or `failed`;
 3. recomputes the next occurrence and re-arms.
+
+Every source goes through the same `scheduler.dispatch(taskId, event)` — an HTTP request carries its body
+in `payload`, a manual run carries `actor: 'panel' | 'tool'`. Delivery, failure counting and the record
+are identical, so a new source cannot drift from the others.
 
 `now()` is injected, which is what makes the tests deterministic.
 
@@ -228,6 +241,11 @@ panel, the history, and the `task_center` tool all say the same thing about a ru
 Everything is served from the profile's own web server under `/task-center`, registered as one prefix
 route. Mutating routes require a JSON content type and reject a foreign `Origin`; reads are plain GETs.
 
+The fence compares that `Origin` with the **host the request was addressed to** — `X-Forwarded-Host` when a
+proxy set it, otherwise `Host` — and only falls back to the address the listener bound. A panel served
+through nginx, a tunnel or Cloudflare Access therefore keeps working, while a page on another site still
+gets `403 cross-origin`. See [ADR 0010](adr/0010-origin-fence-trusts-the-request-host.md).
+
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/task-center/api/state` | tasks, workspaces, presets, model and permission catalogs, capabilities, origin, version |
@@ -239,7 +257,11 @@ route. Mutating routes require a JSON content type and reject a foreign `Origin`
 | `POST` | `/task-center/api/tasks/<id>/delete` | delete |
 | `POST` | `/task-center/api/tasks/<id>/rotate-secret` | new webhook secret |
 | `POST` | `/task-center/api/tasks/<id>/clear-history` | drop the run history |
+| `POST` | `/task-center/api/tasks/<id>/run` | dispatch one `manual` event now, whatever the trigger |
 | `ANY` | `/task-center/hook/<id>/<secret>` | fire a webhook task |
+
+`/tasks/<id>/run` answers with the `RunRecord` itself (`{ ok, entry }`), or `409 disabled` when the task
+is off; the panel's **Run now** button and the tool's `run` action both call it.
 
 Errors are `{ ok: false, code, message }` with a stable `code` (`trigger/every-invalid`,
 `target/missing`, `conflict`, …) so the panel can localise without matching English text.
@@ -265,12 +287,13 @@ own catalog and never calls this route.
 
 ## The `task_center` tool
 
-One tool, four actions — `create`, `list`, `update`, `delete`. There is deliberately no `run` action:
-firing a task is the user's decision, made in the panel or by a webhook.
+One tool, five actions — `create`, `list`, `update`, `delete`, `run`. `run` dispatches a `manual` event,
+the same one the panel's **Run now** button sends; it never changes the task's trigger. A disabled task
+answers `disabled` rather than firing.
 
 `create` defaults the target to the **calling session** when the model does not name one, which is the
 useful default in a conversation ("remind me here in an hour"). Schemas are plain JSON Schema, and
-`assertArguments` produces readable failures (`action must be one of create, list, update, delete`).
+`assertArguments` produces readable failures (`action must be one of create, list, update, delete, run`).
 
 `list` returns one line per task — name, trigger summary, target summary, next run — because a model
 reading fifty records learns less than a model reading fifty lines.
@@ -345,7 +368,8 @@ npm test           # unit tests only
 | `test/core.test.mjs` | model normalisation, cron parsing, DST edges, occurrence counting |
 | `test/store.test.mjs` | atomic writes, corrupt-file quarantine, concurrent updates |
 | `test/scheduler.test.mjs` | arming, firing, missed runs, failure counting, DST |
-| `test/api.test.mjs` | every route against a real HTTP server, origin fence, rate limit, rotation |
+| `test/api.test.mjs` | every route against a real HTTP server, origin fence (including a proxied `Host`), rate limit, rotation |
+| `test/events.test.mjs` | the source of every trigger kind, event shapes, the source on a stored record |
 | `test/tool.test.mjs` | the tool contract, target defaults, secret redaction |
 | `test/worktree.test.mjs` | the other plugin's HTTP contract against a stand-in server, and the failure codes |
 | `test/core.test.mjs` (model cases) | model/permission validation, stored-target sanitising, summaries |
@@ -364,6 +388,18 @@ node test/e2e/worktree.mjs --origin http://127.0.0.1:3080 --repo /path/to/git/re
 It creates one webhook task, fires it twice, and asserts two distinct worktrees, two branches, two
 sessions whose `cwd` is inside them, and a history that names each branch. It is not part of `npm test`
 because it needs a profile that carries the optional plugin.
+
+`test/e2e/manual-and-proxy.mjs` drives the two things a proxied deployment exposes, through
+`test/e2e/proxy.mjs` (a throwaway reverse proxy that also forwards WebSocket upgrades):
+
+```bash
+node test/e2e/proxy.mjs --listen 4173 --target http://127.0.0.1:3080 &
+node test/e2e/manual-and-proxy.mjs --origin http://127.0.0.1:3080 --proxy http://127.0.0.1:4173
+```
+
+It edits a task's message through the proxy and reads it back (the save used to be refused with
+`cross-origin`), creates a `manual` task, runs it, and asserts the record names `manual` and that the
+clock leaves it alone.
 
 `test/e2e/model-permission.mjs` is the same kind of manual check for the two switches:
 

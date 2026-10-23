@@ -41,7 +41,7 @@ test('tool: the definition matches what the registry needs', () => {
   assert.equal(TASK_CENTER_TOOL.name, 'task_center');
   assert.equal(TASK_CENTER_TOOL.parameters.type, 'object');
   assert.deepEqual(TASK_CENTER_TOOL.parameters.required, ['action']);
-  assert.deepEqual(TASK_CENTER_TOOL.parameters.properties.action.enum, ['create', 'list', 'update', 'delete']);
+  assert.deepEqual(TASK_CENTER_TOOL.parameters.properties.action.enum, ['create', 'list', 'update', 'delete', 'run']);
   assert.equal(TASK_CENTER_TOOL.output.schema.type, 'object');
   const rendered = TASK_CENTER_TOOL.output.render({}, { ok: true });
   assert.equal(rendered[0].type, 'text');
@@ -168,7 +168,7 @@ test('tool: invalid arguments are rejected by the definition itself', async () =
   const harness = await withRuntime();
   try {
     await assert.rejects(() => TASK_CENTER_TOOL.execute({}, exec()), /"action"/u);
-    await assert.rejects(() => TASK_CENTER_TOOL.execute({ action: 'run', id: 'x' }, exec()), /must be one of create, list, update, delete/u);
+    await assert.rejects(() => TASK_CENTER_TOOL.execute({ action: 'explode' }, exec()), /must be one of create, list, update, delete, run/u);
     await assert.rejects(() => TASK_CENTER_TOOL.execute({ action: 'delete' }, exec()), /needs the task id/u);
   } finally {
     await harness.cleanup();
@@ -235,6 +235,58 @@ test('tool: create stores the model and permission it was given', async () => {
     assert.equal(stored.target.permission, 'read-only');
     const listed = await TASK_CENTER_TOOL.execute({ action: 'list' }, exec());
     assert.match(JSON.stringify(listed), /using deepseek-chat \(read-only\)/u);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('tool: a manual task can be created and run by the agent', async () => {
+  const harness = await withRuntime();
+  try {
+    const created = await TASK_CENTER_TOOL.execute({
+      action: 'create',
+      name: 'by hand',
+      trigger: { kind: 'manual' },
+      target: { kind: 'session', sessionId: 'sess-target' },
+      message: { text: 'body' },
+    }, exec());
+    assert.equal(created.ok, true, JSON.stringify(created));
+    assert.equal(created.task.trigger.kind, 'manual');
+
+    const ran = await TASK_CENTER_TOOL.execute({ action: 'run', id: created.created }, exec());
+    assert.equal(ran.ok, true, JSON.stringify(ran));
+    assert.equal(ran.ran, created.created);
+    assert.equal(ran.sessionId, 'sess-1');
+
+    const listed = await TASK_CENTER_TOOL.execute({ action: 'list' }, exec());
+    const task = listed.tasks.find((item) => item.id === created.created);
+    assert.equal(task.trigger, 'manual');
+    assert.equal(task.nextAt, null);
+    assert.equal(task.lastResult, 'ok');
+
+    const missing = await TASK_CENTER_TOOL.execute({ action: 'run', id: 'task-00000000-0000-4000-8000-000000000000' }, exec());
+    assert.equal(missing.ok, false);
+    assert.equal(missing.code, 'not-found');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('tool: a disabled task refuses to run', async () => {
+  const harness = await withRuntime();
+  try {
+    const created = await TASK_CENTER_TOOL.execute({
+      action: 'create',
+      name: 'off',
+      enabled: false,
+      trigger: { kind: 'manual' },
+      target: { kind: 'session', sessionId: 'sess-target' },
+      message: { text: 'body' },
+    }, exec());
+    assert.equal(created.ok, true, JSON.stringify(created));
+    const ran = await TASK_CENTER_TOOL.execute({ action: 'run', id: created.created }, exec());
+    assert.equal(ran.ok, false);
+    assert.equal(ran.code, 'disabled');
   } finally {
     await harness.cleanup();
   }

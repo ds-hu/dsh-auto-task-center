@@ -1,7 +1,7 @@
 # Task Center for DSH
 
-**任务中心 / Task Center** — scheduled and webhook-triggered tasks for DeepSeek Harness.
-Add a task once, and DSH opens a session or messages an existing one on your schedule.
+**任务中心 / Task Center** — scheduled, HTTP- and hand-triggered tasks for DeepSeek Harness.
+Add a task once, and DSH opens a session or messages an existing one when the task fires.
 
 <p align="center">
   <img src="docs/screenshots/01-panel.png" alt="Task Center in the right sidebar: every row carries its trigger, target, model and permission" width="820">
@@ -21,13 +21,24 @@ Task Center is a tab in the session's right sidebar: no new window, no separate 
 Every row answers three questions at a glance — is it on, when does it fire next, where does it deliver.
 A disabled task stays in the list with its settings and history intact.
 
-## Six triggers, and you can see the clock
+## One task, one source
 
-One-off, interval, daily, weekly, cron, or a webhook URL — pick the simplest form that fits.
-**Next 5 runs** is computed in the time zone you chose, so a wrong cron expression shows up before you save it.
+A task is caused by exactly one thing, and every row says which:
+
+- **A schedule** — one-off, fixed interval, daily, weekly, or cron. **Next 5 runs** is computed in the time
+  zone you chose, so a wrong cron expression shows up before you save it.
+- **An HTTP request** — a webhook URL with its own secret, for CI, a GitHub hook, or a shell one-liner.
+- **You** — a manual task has no clock and no address. It runs when you press **Run now**, and at no other time.
 
 <p align="center">
   <img src="docs/screenshots/02-trigger.png" alt="A daily 09:00 trigger in Asia/Shanghai with the next five runs listed" width="820">
+</p>
+
+Running a scheduled task by hand is still a manual run, and the record says so: *Manual · Session 3f2a1c*
+rather than pretending the schedule fired. The agent can fire one too — `task_center` has a `run` action.
+
+<p align="center">
+  <img src="docs/screenshots/05-manual.png" alt="A manual task: no schedule, a Run now button, and a run record marked Manual" width="760">
 </p>
 
 ## Where it runs, on which model, with which permission
@@ -54,18 +65,18 @@ With [`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces) i
 land in a **fresh worktree made per run**: each run branches off the base you pick, so a nightly job never touches
 the checkout you have open.
 
-## Webhooks and the run record
+## HTTP triggers and the run record
 
-Every webhook task gets its own URL and secret — paste it into GitHub, your CI, or a shell one-liner; it shares
-DSH's port. The request body replaces `{{payload}}` in your message, and **Rotate secret** makes a leaked URL
-useless in one click.
+An HTTP task gets its own URL and secret, on DSH's own port. The request body replaces `{{payload}}` in your
+message, and **Rotate secret** makes a leaked URL useless in one click.
 
 ```bash
 curl -X POST "http://127.0.0.1:3080/task-center/hook/<task-id>/<secret>" -d '{"branch":"main"}'
 ```
 
-Every run leaves a record: delivered, skipped because DSH was closed, or failed because the target was gone.
-A task that keeps failing is flagged **needs attention** instead of quietly doing nothing.
+Every run leaves a record naming its source — schedule, HTTP, or manual: delivered, skipped because DSH was
+closed, or failed because the target was gone. A task that keeps failing is flagged **needs attention** instead
+of quietly doing nothing.
 
 <p align="center">
   <img src="docs/screenshots/04-history.png" alt="Run history: two deliveries, each naming its session, model and permission" width="820">
@@ -74,7 +85,8 @@ A task that keeps failing is flagged **needs attention** instead of quietly doin
 ## A preset that hands scheduling to the agent
 
 Installing the plugin adds an agent preset, **任务管理**: Standard mode without the built-in reminder tools, plus a
-`task_center` tool — so you can say *"every weekday at 9, summarise the repo"* and the agent writes the task itself.
+`task_center` tool — so you can say *"every weekday at 9, summarise the repo"* and the agent writes the task
+itself. It can list, edit, delete, and fire one on demand.
 
 The panel borrows DSH's theme tokens, so it looks native in light and dark alike.
 
@@ -88,6 +100,9 @@ dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 
 Restart `dsh web`, open any session, and pick **Task Center** from the right sidebar's start page.
 The **任务管理** preset shows up in the composer's mode menu.
+
+Behind a reverse proxy, a tunnel, or Cloudflare Access, the panel keeps working: a write is checked against the
+host your browser actually used, not the loopback address DSH bound.
 
 ## Uninstall
 

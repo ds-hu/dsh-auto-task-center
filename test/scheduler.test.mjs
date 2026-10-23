@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createDeliverer, DeliveryError, renderMessage } from '../lib/deliver.js';
+import { createEvent } from '../lib/events.js';
 import { normalizeDraft } from '../lib/model.js';
 import { createScheduler, recomputeSchedule } from '../lib/scheduler.js';
 import { createStore } from '../lib/store.js';
@@ -57,6 +58,12 @@ test('recomputeSchedule: statuses and next occurrence', () => {
   assert.equal(recomputeSchedule(hook, BASE), false, 'a webhook task needs no schedule change');
   assert.equal(hook.state.status, 'active');
   assert.equal(hook.state.nextAt, undefined);
+
+  const manual = makeTask({ trigger: { kind: 'manual' } });
+  assert.equal(recomputeSchedule(manual, BASE), false, 'a manual task needs no schedule change');
+  assert.equal(manual.state.status, 'active');
+  assert.equal(manual.state.nextAt, undefined);
+  assert.equal(manual.trigger.kind, 'manual');
 });
 
 test('scheduler: downtime is recorded as one skipped run, never delivered late', async () => {
@@ -142,13 +149,14 @@ test('scheduler: a webhook run bypasses the clock', async () => {
   await store.put(task);
   const scheduler = createScheduler({ store, deliverer, now: () => BASE });
 
-  const entry = await scheduler.runNow(task.id, { payload: 'from the web' });
+  const entry = await scheduler.dispatch(task.id, createEvent({ source: 'http', at: BASE, payload: 'from the web' }));
   assert.equal(entry.result, 'ok');
+  assert.equal(entry.source, 'http');
   assert.equal(deliverer.calls[0].payload, 'from the web');
   const stored = store.get(task.id);
   assert.equal(stored.history.length, 1);
   assert.equal(stored.state.nextAt, undefined);
-  assert.equal(await scheduler.runNow('task-missing', {}), undefined);
+  assert.equal(await scheduler.dispatch('task-missing', createEvent({ source: 'manual', at: BASE })), undefined);
   await store.close();
 });
 
@@ -553,5 +561,43 @@ test('scheduler: a run records the model and permission it used', async () => {
   assert.equal(entry.params.model, 'deepseek/deepseek-chat');
   assert.equal(entry.params.permission, 'read-only');
   assert.match(entry.detail, /using deepseek\/deepseek-chat as read-only/u);
+  await store.close();
+});
+
+test('scheduler: a manual task never fires on the timer', async () => {
+  const store = await makeStore();
+  const deliverer = stubDeliverer();
+  const manual = makeTask({ trigger: { kind: 'manual' } });
+  const scheduled = makeTask({ name: 'tick', trigger: { kind: 'every', everySeconds: 60 } });
+  recomputeSchedule(manual, BASE);
+  recomputeSchedule(scheduled, BASE);
+  await store.put(manual);
+  await store.put(scheduled);
+  let clock = BASE;
+  const scheduler = createScheduler({ store, deliverer, now: () => clock });
+
+  clock = BASE + 60_000;
+  await scheduler.tick();
+  assert.deepEqual(deliverer.calls.map((call) => call.taskId), [scheduled.id], 'only the timed task runs');
+
+  const entry = await scheduler.dispatch(manual.id, createEvent({ source: 'manual', at: BASE, actor: 'panel' }));
+  assert.equal(entry.result, 'ok');
+  assert.equal(entry.source, 'manual');
+  assert.equal(store.get(manual.id).history[0].source, 'manual');
+  assert.equal(store.get(manual.id).state.nextAt, undefined, 'a manual run schedules nothing');
+  await store.close();
+});
+
+test('scheduler: a manual task is not reported as having missed runs', async () => {
+  const store = await makeStore();
+  const deliverer = stubDeliverer();
+  const manual = makeTask({ trigger: { kind: 'manual' } });
+  await store.put(manual);
+  const scheduler = createScheduler({ store, deliverer, now: () => BASE });
+  await scheduler.start();
+  await scheduler.stop();
+  const stored = store.get(manual.id);
+  assert.equal(stored.history.length, 0);
+  assert.equal(stored.state.lastResult, undefined);
   await store.close();
 });

@@ -14,12 +14,26 @@ stops the trigger.
 
 ## Trigger
 
-The rule that decides *when*. Exactly one per task, and it is a closed set: **once** (`at`),
-**interval** (`every`), **daily**, **weekly**, **cron**, **webhook**.
+The rule that decides *what causes a run*. Exactly one per task, and it is a closed set: **once** (`at`),
+**interval** (`every`), **daily**, **weekly**, **cron**, **webhook**, **manual**.
 
 **Interval** is anchored — `everySeconds` counted from `anchorAt` — so an interval task does not drift
-when DSH restarts. **Webhook** is the one trigger without a schedule: it is caused by an HTTP call, not
-by the clock.
+when DSH restarts. **Webhook** and **manual** are the triggers without a schedule: one is caused by an
+HTTP call, the other by a person or an agent asking. Both are *active* with no **next run**, which the
+panel shows as *Webhook* / *Manual* instead of a countdown.
+
+## Source
+
+Which of the three causes produced one **run**: `schedule`, `http`, `manual`. Every trigger belongs to
+exactly one source, and the source is written onto the **run record**, so a history line answers "why did
+this happen" without consulting the task. Running a scheduled task by hand is a `manual` run on a task
+whose trigger stays a schedule.
+
+## Event
+
+One firing: a source, an instant, and whatever that source carries — the request body for `http`, the actor
+(`panel` or `tool`) for `manual`. Events are the only way a run starts; the scheduler, the webhook route and
+the **Run now** button all build one and hand it to the same dispatcher.
 
 ## Occurrence
 
@@ -32,8 +46,8 @@ why a daily task still fires at 09:00 local when the server sits in another zone
 ## Run
 
 One attempt to deliver one occurrence. A run has a **result** — `ok`, `failed`, `skipped`, `missed` —
-and a stable **code** the UI localises. Runs are recorded in a task's **history**, newest first, capped
-at fifty.
+the **source** that caused it, and a stable **code** the UI localises. Runs are recorded in a task's
+**history**, newest first, capped at fifty.
 
 `missed` is not `skipped`: *skipped* means several occurrences passed while DSH was closed and became one
 record; *missed* is the single record written for that gap. The panel shows both as 已跳过 because the

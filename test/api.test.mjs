@@ -117,9 +117,50 @@ async function boot({ worktrees, bare = false } = {}) {
     return { status: response.status, body };
   }
 
+  /**
+   * One request with full control over the `Host` header, which `fetch` will not
+   * let a caller set. The proxy tests need it.
+   * @param {string} path - Path below the origin.
+   * @param {{ method?: string, body?: unknown, headers?: Record<string, string> }} [options] - Request options.
+   * @returns {Promise<{ status: number, body: any }>} the response.
+   */
+  function raw(path, options = {}) {
+    return new Promise((resolve, reject) => {
+      const payload = options.body === undefined ? undefined : JSON.stringify(options.body);
+      const request = http.request({
+        host: '127.0.0.1',
+        port: Number(new URL(origin).port),
+        path,
+        method: options.method ?? 'GET',
+        headers: {
+          ...(payload === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }),
+          ...(options.headers ?? {}),
+        },
+      }, (response) => {
+        /** @type {Buffer[]} */
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          let body;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = text;
+          }
+          resolve({ status: response.statusCode ?? 0, body });
+        });
+      });
+      request.on('error', reject);
+      if (payload !== undefined) request.write(payload);
+      request.end();
+    });
+  }
+
   return {
     origin,
     call,
+    raw,
     store,
     delivered,
     async close() {
@@ -183,6 +224,38 @@ test('api: mutations require JSON and the Host origin', async () => {
       headers: { origin: harness.origin },
     });
     assert.equal(sameOrigin.status, 200);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a reverse proxy origin is accepted when it matches the request Host', async () => {
+  const harness = await boot();
+  try {
+    // What a browser behind Cloudflare (or any reverse proxy) sends: the public
+    // page origin and the public Host, while the listener is bound to loopback.
+    const proxied = await harness.raw('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft(),
+      headers: { origin: 'https://dsh.example.com', host: 'dsh.example.com' },
+    });
+    assert.equal(proxied.status, 200, JSON.stringify(proxied.body));
+
+    const forwarded = await harness.raw('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft(),
+      headers: { origin: 'https://dsh.example.com', host: '127.0.0.1:1', 'x-forwarded-host': 'dsh.example.com' },
+    });
+    assert.equal(forwarded.status, 200, JSON.stringify(forwarded.body));
+
+    // A page on another site never matches, even behind the same proxy.
+    const crossSite = await harness.raw('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft(),
+      headers: { origin: 'https://evil.example', host: 'dsh.example.com' },
+    });
+    assert.equal(crossSite.status, 403);
+    assert.equal(crossSite.body.code, 'cross-origin');
   } finally {
     await harness.close();
   }
@@ -506,6 +579,69 @@ test('api: a task keeps the model and permission it was saved with', async () =>
     assert.deepEqual(created.body.task.target.model, { provider: 'deepseek', model: 'deepseek-chat' });
     assert.equal(created.body.task.target.permission, 'read-only');
     assert.match(created.body.task.targetSummary, /using deepseek-chat \(read-only\)/u);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a manual task runs when asked, and only then', async () => {
+  const harness = await boot();
+  try {
+    const created = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({ name: 'by hand', trigger: { kind: 'manual' } }),
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    const task = created.body.task;
+    assert.equal(task.trigger.kind, 'manual');
+    assert.equal(task.state.nextAt, undefined);
+    assert.equal(task.state.status, 'active');
+    assert.deepEqual(task.history, []);
+
+    const ran = await harness.call(`/task-center/api/tasks/${task.id}/run`, { method: 'POST', body: {} });
+    assert.equal(ran.status, 200, JSON.stringify(ran.body));
+    assert.equal(ran.body.ok, true);
+    assert.equal(ran.body.entry.source, 'manual');
+    assert.equal(ran.body.entry.result, 'ok');
+    assert.equal(ran.body.entry.sessionId, 'sess-42');
+    assert.equal(harness.delivered.at(-1).taskId, task.id);
+
+    const state = await harness.call('/task-center/api/state');
+    const stored = state.body.tasks.find((item) => item.id === task.id);
+    assert.equal(stored.history.length, 1);
+    assert.equal(stored.history[0].source, 'manual');
+    assert.equal(stored.state.nextAt, undefined, 'running by hand schedules nothing');
+
+    const paused = await harness.call(`/task-center/api/tasks/${task.id}`, {
+      method: 'POST',
+      body: { task: { ...created.body.task, enabled: false }, expectedUpdatedAt: stored.updatedAt },
+    });
+    assert.equal(paused.status, 200, JSON.stringify(paused.body));
+    const refused = await harness.call(`/task-center/api/tasks/${task.id}/run`, { method: 'POST', body: {} });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.code, 'disabled');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: runs are recorded with the source that caused them', async () => {
+  const harness = await boot();
+  try {
+    const hook = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({ name: 'hook', trigger: { kind: 'webhook' } }),
+    });
+    const hookTask = hook.body.task;
+    const called = await harness.call(`/task-center/hook/${hookTask.id}/${hookTask.trigger.secret}`, { method: 'POST', body: 'payload' });
+    assert.equal(called.status, 200, JSON.stringify(called.body));
+
+    const scheduled = await harness.call('/task-center/api/tasks', { method: 'POST', body: draft({ name: 'timed' }) });
+    const timed = scheduled.body.task;
+    const state = await harness.call('/task-center/api/state');
+    const byId = (id) => state.body.tasks.find((item) => item.id === id);
+    assert.equal(byId(hookTask.id).history[0].source, 'http');
+    assert.equal(byId(timed.id).history.length, 0);
   } finally {
     await harness.close();
   }
