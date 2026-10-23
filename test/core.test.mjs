@@ -285,3 +285,89 @@ test('model: the target summary names the worktree and its base', () => {
   );
   assert.equal(describeTarget({ kind: 'newSession', workspaceId: 'ws-1' }), 'new session in ws-1');
 });
+
+test('model: a new session can pin its model and permission', () => {
+  const draft = normalizeDraft({
+    name: 'nightly',
+    trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+    target: {
+      kind: 'newSession',
+      workspaceId: 'ws-1',
+      model: { provider: ' deepseek ', model: ' deepseek-chat ', reasoningEffort: 'high' },
+      permission: ' read-only ',
+    },
+    message: { text: 'run checks' },
+  }, { nowMs: BASE });
+  assert.deepEqual(draft.target.model, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' });
+  assert.equal(draft.target.permission, 'read-only');
+
+  const plain = normalizeDraft({
+    name: 'nightly',
+    trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'a', model: 'b' } },
+    message: { text: 'run checks' },
+  }, { nowMs: BASE });
+  assert.deepEqual(plain.target.model, { provider: 'a', model: 'b' }, 'an omitted effort stays omitted');
+});
+
+test('model: unusable model and permission shapes are rejected by name', () => {
+  const base = {
+    name: 'nightly',
+    trigger: { kind: 'daily', time: '09:00', timeZone: 'UTC' },
+    message: { text: 'run checks' },
+  };
+  assert.throws(
+    () => normalizeDraft({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'a' } } }, { nowMs: BASE }),
+    (error) => error.code === 'target/model-invalid',
+  );
+  assert.throws(
+    () => normalizeDraft({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', model: 7 } }, { nowMs: BASE }),
+    (error) => error.code === 'target/model-invalid',
+  );
+  assert.throws(
+    () => normalizeDraft({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', permission: 'read only!' } }, { nowMs: BASE }),
+    (error) => error.code === 'target/permission-invalid',
+  );
+  assert.throws(
+    () => normalizeDraft({ ...base, target: { kind: 'session', sessionId: 's-1', permission: 'read-only' } }, { nowMs: BASE }),
+    (error) => error.code === 'target/model-session',
+  );
+});
+
+test('model: stored targets keep a valid pair and drop a broken one', () => {
+  const base = {
+    id: 'task-11111111-2222-3333-4444-555555555555',
+    name: 'nightly',
+    enabled: true,
+    trigger: { kind: 'daily', time: '09:00:00', timeZone: 'UTC' },
+    message: { text: 'body' },
+    state: {},
+    history: [],
+    createdAt: new Date(BASE).toISOString(),
+    updatedAt: new Date(BASE).toISOString(),
+  };
+  const kept = sanitizeStoredTask({
+    ...base,
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat' }, permission: 'workspace-write' },
+  });
+  assert.deepEqual(kept.target.model, { provider: 'deepseek', model: 'deepseek-chat' });
+  assert.equal(kept.target.permission, 'workspace-write');
+  const broken = sanitizeStoredTask({ ...base, target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: '' }, permission: 'bad name' } });
+  assert.equal(broken.target.model, undefined);
+  assert.equal(broken.target.permission, undefined);
+});
+
+test('model: the target summary names the model and the permission', () => {
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat' } }),
+    'new session in ws-1 using deepseek-chat',
+  );
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', permission: 'read-only', agentPreset: 'standard' }),
+    'new session in ws-1 (standard, read-only)',
+  );
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', permission: 'read-only' }),
+    'new session in ws-1 (read-only)',
+  );
+});

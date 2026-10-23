@@ -14,7 +14,7 @@ const BASE = Date.parse('2026-06-01T08:00:00Z');
  * Boot the HTTP surface against stubs and hand back a client.
  * @returns {Promise<{ origin: string, call: Function, store: any, close: Function, sessions: string[] }>} the harness.
  */
-async function boot({ worktrees } = {}) {
+async function boot({ worktrees, bare = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'task-center-api-'));
   const store = createStore({ dir });
   store.load();
@@ -39,8 +39,31 @@ async function boot({ worktrees } = {}) {
           ],
         };
       },
+      async modelCatalog() {
+        if (bare) throw new Error('this deployment composes no model catalog');
+        return {
+          default: { provider: 'deepseek', model: 'deepseek-chat' },
+          groups: [
+            { id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat' }] },
+            { id: 'pi-ai', name: 'Pi', models: [{ id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash' }] },
+          ],
+        };
+      },
     },
     get: (key) => {
+      if (key === 'permissionPresets') {
+        if (bare) return undefined;
+        return {
+          catalog: () => ({
+            options: [
+              { value: 'read-only', name: 'read-only' },
+              { value: 'workspace-write', name: 'workspace-write' },
+              { value: 'danger-full-access', name: 'danger-full-access' },
+            ],
+            defaultPreset: 'workspace-write',
+          }),
+        };
+      }
       if (key === 'agentPresets') {
         return {
           async list() {
@@ -432,6 +455,57 @@ test('api: a worktree task can be created and stored', async () => {
     assert.deepEqual(created.body.task.target.worktree, { base: 'main' });
     const stored = harness.store.get(created.body.task.id);
     assert.deepEqual(stored.target.worktree, { base: 'main' });
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: the panel state carries the model and permission catalogs', async () => {
+  const harness = await boot();
+  try {
+    const state = await harness.call('/task-center/api/state');
+    assert.equal(state.body.capabilities.models, true);
+    assert.equal(state.body.capabilities.permissions, true);
+    assert.deepEqual(state.body.models.options.map((row) => `${row.provider}/${row.model}`), ['deepseek/deepseek-chat', 'pi-ai/gemini-3.8-flash-high']);
+    assert.deepEqual(state.body.models.default, { provider: 'deepseek', model: 'deepseek-chat' });
+    assert.deepEqual(state.body.permissions.options.map((row) => row.value), ['read-only', 'workspace-write', 'danger-full-access']);
+    assert.equal(state.body.permissions.default, 'workspace-write');
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a profile without the catalogs reports the capabilities as false', async () => {
+  const harness = await boot({ bare: true });
+  try {
+    const state = await harness.call('/task-center/api/state');
+    assert.equal(state.body.capabilities.models, false);
+    assert.equal(state.body.capabilities.permissions, false);
+    assert.deepEqual(state.body.models.options, []);
+    assert.deepEqual(state.body.permissions.options, []);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a task keeps the model and permission it was saved with', async () => {
+  const harness = await boot();
+  try {
+    const created = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({
+        target: {
+          kind: 'newSession',
+          workspaceId: 'ws-1',
+          model: { provider: 'deepseek', model: 'deepseek-chat' },
+          permission: 'read-only',
+        },
+      }),
+    });
+    assert.equal(created.status, 200);
+    assert.deepEqual(created.body.task.target.model, { provider: 'deepseek', model: 'deepseek-chat' });
+    assert.equal(created.body.task.target.permission, 'read-only');
+    assert.match(created.body.task.targetSummary, /using deepseek-chat \(read-only\)/u);
   } finally {
     await harness.close();
   }

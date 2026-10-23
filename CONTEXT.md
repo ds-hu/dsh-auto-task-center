@@ -44,7 +44,7 @@ user-visible outcome is identical — nothing was delivered.
 Where a run delivers. Two kinds only:
 
 - **new session** — in a chosen workspace (by id, or by path when the id is gone), with a chosen agent
-  preset, optionally in a **fresh worktree**;
+  preset, optionally in a **fresh worktree**, on a chosen **model** and under a chosen **permission**;
 - **existing session** — a session id that must still resolve when the run fires.
 
 A target that no longer resolves is a **failure**, not a silent no-op: the record says why, and the task
@@ -60,6 +60,26 @@ always replaced — with the body for a webhook run, with nothing for a timed ru
 
 **Goal mode** changes the delivery mechanism, not the message: the text is handed to `/goal` instead of
 being sent as a message, so the turn runs autonomously towards that objective.
+
+## Model target
+
+The model a **new session** runs on, stored as the pair the Host's catalog advertises —
+`{ provider, model }` — not as a display label. Absent means *whatever this deployment defaults to*, which
+is the common case.
+
+The pair is checked when the run fires, not when the task is saved: a model that has become unroutable is a
+**failure** (`model-unavailable`), never a quiet fallback to the default model, because the point of
+pinning one is that the run costs and reasons the way you decided.
+
+## Permission target
+
+The **permission preset** a new session starts under — `read-only`, `workspace-write`,
+`danger-full-access` on a stock profile, or any key the profile configures. It bundles DSH's sandbox mode
+and approval policy, which is why the task stores a name and not two knobs.
+
+It is applied through the Host's own `/permission` command, before the first turn: *仅可查看* means the run
+is boxed in from its first action, not from its second. A preset the profile no longer offers is a
+**failure** (`permission-invalid`), never a silent switch to a wider one.
 
 ## Worktree target
 

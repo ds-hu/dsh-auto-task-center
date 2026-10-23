@@ -438,3 +438,120 @@ test('deliver: worktree refusals keep their code', async () => {
     (error) => error.code === 'worktree-base-invalid',
   );
 });
+
+/** A Host context stub that records model, permission and prompt calls in order. */
+function switchableContext({ selectModel, execute } = {}) {
+  const order = [];
+  const ctx = {
+    sessionController: {
+      async create() {
+        order.push('create');
+        return { sessionId: 'sess-sw' };
+      },
+      async selectModel(request) {
+        order.push('selectModel');
+        if (selectModel !== undefined) return selectModel(request);
+        return { selected: { provider: request.provider, model: request.model } };
+      },
+      async prompt() {
+        order.push('prompt');
+      },
+      async resolveAgent() {
+        return { agent: { id: 'agent-1' } };
+      },
+    },
+    get: (key) => (key === 'commands'
+      ? {
+        async execute(agent, line) {
+          order.push(`command:${line}`);
+          if (execute !== undefined) return execute(agent, line);
+          return { result: { kind: 'success', text: 'preset read-only' } };
+        },
+      }
+      : undefined),
+  };
+  return { ctx, order };
+}
+
+test('deliver: model and permission are set before the first prompt', async () => {
+  const { ctx, order } = switchableContext();
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({
+    target: {
+      kind: 'newSession',
+      workspaceId: 'ws-1',
+      model: { provider: 'deepseek', model: 'deepseek-chat' },
+      permission: 'read-only',
+    },
+  });
+  const result = await deliverer.deliver({ task, signal: AbortSignal.timeout(5000) });
+  assert.deepEqual(order, ['create', 'selectModel', 'command:/permission read-only', 'prompt']);
+  assert.deepEqual(result.applied, { model: 'deepseek/deepseek-chat', permission: 'read-only' });
+});
+
+test('deliver: a model refusal fails the run before anything is sent', async () => {
+  const { ctx, order } = switchableContext({
+    selectModel: async () => {
+      throw new Error('unknown model');
+    },
+  });
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'x', model: 'y' } } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'model-unavailable' && /unknown model/u.test(error.message),
+  );
+  assert.deepEqual(order, ['create', 'selectModel'], 'no prompt may happen without the chosen model');
+});
+
+test('deliver: an unknown permission preset is reported with the Host text', async () => {
+  const { ctx } = switchableContext({
+    execute: async () => ({ result: { kind: 'error', text: 'unknown preset "nope" (available: read-only, workspace-write)' } }),
+  });
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', permission: 'nope' } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'permission-invalid' && /available: read-only/u.test(error.message),
+  );
+});
+
+test('deliver: a profile without a command service cannot switch permission', async () => {
+  const { ctx } = switchableContext();
+  const withoutCommands = { sessionController: ctx.sessionController, get: () => undefined };
+  const deliverer = createDeliverer({ ctx: withoutCommands });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', permission: 'read-only' } });
+  await assert.rejects(
+    () => deliverer.deliver({ task, signal: AbortSignal.timeout(5000) }),
+    (error) => error.code === 'commands-unavailable',
+  );
+});
+
+test('deliver: a task without model or permission leaves both alone', async () => {
+  const { ctx, order } = switchableContext();
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1' } });
+  const result = await deliverer.deliver({ task, signal: AbortSignal.timeout(5000) });
+  assert.deepEqual(order, ['create', 'prompt']);
+  assert.equal(result.applied, undefined);
+});
+
+test('scheduler: a run records the model and permission it used', async () => {
+  const store = await makeStore();
+  const deliverer = {
+    async deliver() {
+      return { sessionId: 'sess-9', applied: { model: 'deepseek/deepseek-chat', permission: 'read-only' } };
+    },
+  };
+  const task = makeTask();
+  task.state.nextAt = new Date(BASE).toISOString();
+  await store.put(task);
+  const scheduler = createScheduler({ store, deliverer, now: () => BASE });
+  await scheduler.tick();
+  await scheduler.stop();
+  const entry = store.get(task.id).history[0];
+  assert.equal(entry.params.model, 'deepseek/deepseek-chat');
+  assert.equal(entry.params.permission, 'read-only');
+  assert.match(entry.detail, /using deepseek\/deepseek-chat as read-only/u);
+  await store.close();
+});

@@ -8,6 +8,7 @@ HTTP surface.
 - [Scheduling](#scheduling)
 - [Delivery](#delivery)
 - [Worktree targets](#worktree-targets)
+- [Model and permission](#model-and-permission)
 - [HTTP API](#http-api)
 - [Webhook security](#webhook-security)
 - [The `task_center` tool](#the-task_center-tool)
@@ -73,9 +74,22 @@ A `Task` — everything the panel edits and everything a run needs:
 | `cron` | `expression`, `timeZone` | five-field cron |
 | `webhook` | `secret` | only when called; carries no schedule |
 
-`Target` is either `{ kind: 'newSession', workspaceId?, cwd?, agentPreset?, worktree? }` or
-`{ kind: 'session', sessionId }`. `worktree: { base? }` asks for a fresh git worktree per run and is only
-valid with a `workspaceId` — see [Worktree targets](#worktree-targets).
+`Target` is either
+`{ kind: 'newSession', workspaceId?, cwd?, agentPreset?, worktree?, model?, permission? }` or
+`{ kind: 'session', sessionId }`.
+
+- `worktree: { base? }` asks for a fresh git worktree per run and is only valid with a `workspaceId` —
+  see [Worktree targets](#worktree-targets).
+- `model: { provider, model, reasoningEffort? }` pins the model of the new session; omitted means the
+  deployment default.
+- `permission: string` names the permission preset the new session starts with (`read-only`,
+  `workspace-write`, `danger-full-access` on a stock profile, or anything the profile configures).
+
+Both belong to a new session only: `kind: 'session'` rejects them with `target/model-session`, because
+silently reconfiguring a session a person is using would be a surprise, not a feature. Their shapes are
+checked at save time, but whether the named model or preset still exists is answered when the run fires —
+a profile that renames a preset must not make stored tasks unloadable — see
+[Model and permission](#model-and-permission).
 
 `TaskState` is what the scheduler knows: `status` (`active` / `inactive` / `finished`), `nextAt`,
 `evaluatedThrough`, `lastRunAt`, `lastResult`, `consecutiveFailures`, `needsAttention`.
@@ -184,6 +198,31 @@ The panel renders the switch only when `capabilities.worktrees` is true. A store
 a worktree keeps the switch — plus a warning — after the other plugin is removed, so the target can be
 repaired instead of leaving behind a task whose every run must fail.
 
+## Model and permission
+
+A new session starts on whatever the deployment defaults to, and both knobs are switched only when the
+task asks for it — the deliverer is a guest in the Host's own services, not a second source of truth.
+
+| What | How | Why |
+|---|---|---|
+| Model | `sessionController.selectModel({ sessionId, provider, model, reasoningEffort? })` | writes the durable `model/selection` projection, so the whole session runs on it, not one request |
+| Permission | `commands.execute(agent, '/permission <name>', [])` | the Host already owns the switch: same validation, same `permission/preset` + `sandbox/mode` + `approval/policy` events, same approval-policy write-through |
+
+`selectModel` takes the pair the model catalog advertises; a pair the Host cannot route throws, and the
+run is recorded as `model-unavailable`. `/permission` returns the preset it applied, or an error naming
+the presets that do exist; that becomes `permission-invalid`. Both are applied right after the session
+exists and **before** the first prompt, so no turn ever runs on the previous model or the wrong sandbox.
+
+The panel offers the pickers only when the Host answers for them: `capabilities.models` reflects a
+non-empty `sessionController.modelCatalog()`, `capabilities.permissions` a non-empty
+`permissionPresets.catalog()`. The catalogs themselves arrive in `GET /state` (`models`, `permissions`),
+cached for a minute because a model catalog can reach provider adapters. A deployment without one simply
+shows no model picker; a deployment without command service reports `commands-unavailable` instead of
+pretending the switch happened.
+
+`targetSummary` and every run record carry what was used — `using deepseek-v4-pro as read-only` — so the
+panel, the history, and the `task_center` tool all say the same thing about a run.
+
 ## HTTP API
 
 Everything is served from the profile's own web server under `/task-center`, registered as one prefix
@@ -191,7 +230,7 @@ route. Mutating routes require a JSON content type and reject a foreign `Origin`
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/task-center/api/state` | tasks, workspaces, presets, capabilities, origin, version |
+| `GET` | `/task-center/api/state` | tasks, workspaces, presets, model and permission catalogs, capabilities, origin, version |
 | `GET` | `/task-center/api/sessions?q=&limit=` | session rows for the target picker |
 | `GET` | `/task-center/api/worktree-options?workspaceId=` | base branches, when the worktree plugin is present |
 | `POST` | `/task-center/api/preview` | next five runs for an unsaved trigger |
@@ -309,6 +348,7 @@ npm test           # unit tests only
 | `test/api.test.mjs` | every route against a real HTTP server, origin fence, rate limit, rotation |
 | `test/tool.test.mjs` | the tool contract, target defaults, secret redaction |
 | `test/worktree.test.mjs` | the other plugin's HTTP contract against a stand-in server, and the failure codes |
+| `test/core.test.mjs` (model cases) | model/permission validation, stored-target sanitising, summaries |
 | `test/lifecycle.test.mjs` | mount/dispose leaves the disk untouched; the CLI's purge guards |
 | `test/mount-check.mjs` | package shape, Loader row ids, preset drift against `standard` |
 | `test/client-smoke.mjs` | the browser bundle evaluated against a mock context, theme-only colours |
@@ -324,3 +364,14 @@ node test/e2e/worktree.mjs --origin http://127.0.0.1:3080 --repo /path/to/git/re
 It creates one webhook task, fires it twice, and asserts two distinct worktrees, two branches, two
 sessions whose `cwd` is inside them, and a history that names each branch. It is not part of `npm test`
 because it needs a profile that carries the optional plugin.
+
+`test/e2e/model-permission.mjs` is the same kind of manual check for the two switches:
+
+```bash
+node test/e2e/model-permission.mjs --origin http://127.0.0.1:3080 --home /tmp/tc-e2e/home
+```
+
+It fires one task that asks for a model and a preset, then reads the session log under `$DSH_HOME/sessions/`
+to prove the durable `model/selection` and `permission/preset` events — the panel API never returns those.
+It also fires a task with a preset the profile does not have and one with an unroutable model, and asserts
+the runs fail as `permission-invalid` / `model-unavailable` without half-delivering.

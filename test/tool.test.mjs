@@ -204,3 +204,38 @@ test('tool: create accepts a worktree target and list names it', async () => {
     await harness.cleanup();
   }
 });
+
+test('tool: the schema exposes the model and permission of a new session', () => {
+  const target = TASK_CENTER_TOOL.parameters.properties.target;
+  assert.equal(target.properties.model.type, 'object');
+  assert.deepEqual(target.properties.model.required, ['provider', 'model']);
+  assert.equal(target.properties.permission.type, 'string');
+  assert.match(target.properties.permission.description, /read-only/u);
+  assert.match(TASK_CENTER_TOOL.description, /`permission`/u);
+});
+
+test('tool: create stores the model and permission it was given', async () => {
+  const harness = await withRuntime();
+  try {
+    const created = await TASK_CENTER_TOOL.execute({
+      action: 'create',
+      name: 'nightly',
+      trigger: { kind: 'every', everySeconds: 3600 },
+      target: {
+        kind: 'newSession',
+        workspaceId: 'ws-1',
+        model: { provider: 'deepseek', model: 'deepseek-chat' },
+        permission: 'read-only',
+      },
+      message: { text: 'run the checks' },
+    }, exec());
+    assert.equal(created.ok, true);
+    const stored = harness.store.get(created.task.id);
+    assert.deepEqual(stored.target.model, { provider: 'deepseek', model: 'deepseek-chat' });
+    assert.equal(stored.target.permission, 'read-only');
+    const listed = await TASK_CENTER_TOOL.execute({ action: 'list' }, exec());
+    assert.match(JSON.stringify(listed), /using deepseek-chat \(read-only\)/u);
+  } finally {
+    await harness.cleanup();
+  }
+});
