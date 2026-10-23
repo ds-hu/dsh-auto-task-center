@@ -497,6 +497,51 @@ test('deliver: model and permission are set before the first prompt', async () =
   assert.deepEqual(result.applied, { model: 'deepseek/deepseek-chat', permission: 'read-only' });
 });
 
+test('deliver: the reasoning effort rides along with the model', async () => {
+  /** @type {Record<string, any> | undefined} */
+  let seen;
+  const { ctx, order } = switchableContext({
+    selectModel: async (request) => {
+      seen = request;
+      return { selected: { provider: request.provider, model: request.model } };
+    },
+  });
+  const deliverer = createDeliverer({ ctx });
+  const task = makeTask({
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'max' } },
+  });
+  const result = await deliverer.deliver({ task, signal: AbortSignal.timeout(5000) });
+  assert.equal(seen.reasoningEffort, 'max');
+  assert.deepEqual(order, ['create', 'selectModel', 'prompt']);
+  assert.deepEqual(result.applied, { model: 'deepseek/deepseek-chat', effort: 'max' });
+
+  const plain = createDeliverer({ ctx: switchableContext().ctx });
+  const bare = await plain.deliver({
+    task: makeTask({ target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat' } } }),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.deepEqual(bare.applied, { model: 'deepseek/deepseek-chat' }, 'no effort means no effort field');
+});
+
+test('scheduler: the run record names the model and its effort', async () => {
+  const store = await makeStore();
+  const deliverer = {
+    async deliver() {
+      return { sessionId: 'sess-1', applied: { model: 'deepseek/deepseek-v4-pro', effort: 'high', permission: 'read-only' } };
+    },
+  };
+  const task = makeTask({
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-v4-pro', reasoningEffort: 'high' } },
+  });
+  recomputeSchedule(task, BASE);
+  await store.put(task);
+  const scheduler = createScheduler({ store, deliverer, now: () => BASE });
+  const entry = await scheduler.dispatch(task.id, createEvent({ source: 'manual', at: BASE }));
+  assert.equal(entry.params.effort, 'high');
+  assert.match(entry.detail, /using deepseek\/deepseek-v4-pro at high effort as read-only/u);
+  await store.close();
+});
+
 test('deliver: a model refusal fails the run before anything is sent', async () => {
   const { ctx, order } = switchableContext({
     selectModel: async () => {

@@ -80,7 +80,11 @@ assert.notEqual(workspace, undefined, 'this profile needs one registered workspa
 
 const model = state.models.options.find((entry) => entry.model !== state.models.default.model) ?? state.models.options[0];
 const permission = state.permissions.options.find((option) => option.value === 'read-only') ?? state.permissions.options[0];
-console.log(`workspace=${workspace.title} model=${model.provider}/${model.model} permission=${permission.value}`);
+// Pick an effort the model actually declares, preferring one that is not the default.
+const effort = Array.isArray(model.efforts) && model.efforts.length > 0
+  ? (model.efforts.find((row) => row.id !== model.defaultEffort) ?? model.efforts[0]).id
+  : '';
+console.log(`workspace=${workspace.title} model=${model.provider}/${model.model} permission=${permission.value}${effort === '' ? '' : ` effort=${effort}`}`);
 
 /**
  * Create one webhook task and fire it.
@@ -111,7 +115,7 @@ const happy = await createAndFire({
   kind: 'newSession',
   workspaceId: workspace.id,
   agentPreset: 'standard',
-  model: { provider: model.provider, model: model.model },
+  model: { provider: model.provider, model: model.model, ...(effort === '' ? {} : { reasoningEffort: effort }) },
   permission: permission.value,
 });
 assert.equal(happy.fired.status, 200, `delivery failed: ${JSON.stringify(happy.fired.body)}`);
@@ -119,13 +123,20 @@ const entry = happy.entry;
 assert.equal(entry.result, 'ok', `run failed: ${entry.code} ${entry.detail}`);
 assert.equal(entry.params.model, `${model.provider}/${model.model}`, 'the record must name the model');
 assert.equal(entry.params.permission, permission.value, 'the record must name the permission');
+if (effort !== '') {
+  assert.equal(entry.params.effort, effort, 'the record must name the reasoning effort');
+  assert.match(entry.detail, new RegExp(`at ${effort} effort`, 'u'), 'the detail must say which effort ran');
+}
 console.log('record:', entry.detail);
 
 if (home !== '') {
   const transcript = await sessionTranscript(entry.params.sessionId);
   assert.match(transcript, /"model\/selection"/u, 'the session log must record the model selection');
   assert.match(transcript, new RegExp(`"preset":"${permission.value}"`, 'u'), 'the session log must record the preset');
-  console.log('session log carries model/selection and permission/preset');
+  if (effort !== '') {
+    assert.match(transcript, new RegExp(`"reasoningEffort":"${effort}"`, 'u'), 'the session log must record the effort');
+  }
+  console.log('session log carries model/selection, reasoningEffort and permission/preset');
 }
 
 const badPreset = await createAndFire({ kind: 'newSession', workspaceId: workspace.id, permission: 'no-such-preset' });

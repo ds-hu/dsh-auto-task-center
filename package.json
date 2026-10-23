@@ -1,6 +1,6 @@
 {
   "name": "@ds-hu/dsh-auto-task-center",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Task Center for the DeepSeek Harness Web GUI: create and manage Host-wide scheduled and webhook tasks from the right sidebar, delivered into a new session in any workspace or into an existing session, plus a 任务管理 agent preset.",
   "type": "module",
   "publishConfig": {

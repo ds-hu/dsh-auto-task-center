@@ -47,6 +47,8 @@ Deliver into a **brand-new session** or into an **existing conversation**. For a
 
 - the **workspace** and the **agent preset**;
 - the **model** — the cheap one for routine digests, the deep one for real reasoning;
+- the **reasoning effort** — off, low, high, max: whatever that model declares. The cheap model at low effort
+  for a digest, the deep one at max for a refactor that has to think;
 - the **permission** — read only, workspace write, or full access, the same presets DSH itself offers.
   It is in force before the first turn, so a nightly job is boxed in from its very first action.
 
@@ -57,9 +59,10 @@ Deliver into a **brand-new session** or into an **existing conversation**. For a
 The message is yours to write and arrives as a normal user message, so slash commands still work:
 `/goal` turns the trigger into an autonomous goal run, and any `/skill-name` loads that skill.
 
-The model and permission pickers appear only when the Host offers them, and leaving either empty follows the
-deployment default. If a model or preset later disappears, the task is never silently re-pointed at something
-else: the run record says what failed instead of delivering into the wrong sandbox.
+The model, effort and permission pickers appear only when the Host offers them, and leaving any of them
+empty follows the deployment default. The effort list comes from the chosen model, so it can never name
+something that model cannot do. If a model or preset later disappears, the task is never silently re-pointed
+at something else: the run record says what failed instead of delivering into the wrong sandbox.
 
 With [`dsh-better-workspaces`](https://github.com/ds-hu/dsh-better-workspaces) installed, a new session can also
 land in a **fresh worktree made per run**: each run branches off the base you pick, so a nightly job never touches

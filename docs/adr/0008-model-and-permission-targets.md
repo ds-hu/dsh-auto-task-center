@@ -58,5 +58,8 @@ run fires. A profile that renames or removes a preset must not make stored tasks
 - The run record and the target summary both name what was used (`using deepseek-v4-pro as read-only`), so
   the history, the panel and the `task_center` tool agree, and an audit of "which model did this cost come
   from" needs no second query.
-- `reasoningEffort` is accepted but not surfaced in the panel: the Host fills a default when it is omitted,
-  and exposing the effort ladder is a UI decision for later, not a field to guess at now.
+- `reasoningEffort` was accepted but not surfaced in the panel at first: the Host fills a default when it is
+  omitted. Amended in 0.5.0 — the panel now offers the ladder each model declares, because "which model" and
+  "how hard it thinks" are the same decision for a background job: a nightly digest wants the cheap model at
+  low effort, a refactor the deep one at high. The stored shape did not change; the catalog already carried
+  `reasoning.efforts` and `defaultEffort`.

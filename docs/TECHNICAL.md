@@ -87,8 +87,9 @@ schedule is untouched. See [ADR 0009](adr/0009-one-source-per-task.md).
 
 - `worktree: { base? }` asks for a fresh git worktree per run and is only valid with a `workspaceId` —
   see [Worktree targets](#worktree-targets).
-- `model: { provider, model, reasoningEffort? }` pins the model of the new session; omitted means the
-  deployment default.
+- `model: { provider, model, reasoningEffort? }` pins the model of the new session and, optionally, the
+  reasoning effort it runs at; omitted means the deployment default (and the model's own default effort).
+  The effort is an id from the model's catalog entry (`off`, `low`, `high`, …), never a display label.
 - `permission: string` names the permission preset the new session starts with (`read-only`,
   `workspace-write`, `danger-full-access` on a stock profile, or anything the profile configures).
 
@@ -228,7 +229,16 @@ exists and **before** the first prompt, so no turn ever runs on the previous mod
 
 The panel offers the pickers only when the Host answers for them: `capabilities.models` reflects a
 non-empty `sessionController.modelCatalog()`, `capabilities.permissions` a non-empty
-`permissionPresets.catalog()`. The catalogs themselves arrive in `GET /state` (`models`, `permissions`),
+`permissionPresets.catalog()`.
+
+The reasoning effort is the third switch, and it is not a fixed list: each catalog model declares its own
+`reasoning.efforts` and `reasoning.defaultEffort`, so `GET /state` carries
+`models.options[].efforts: [{ id, name }]` and `models.options[].defaultEffort`. The panel shows the picker
+only for a model that declares efforts, labels the empty choice *Model default (High)* when the Host names
+one, and drops a stored effort the newly chosen model does not declare instead of sending a value the
+provider would reject. The effort travels in the same `selectModel` call, so it lands in the same durable
+`model/selection` event before the first turn; the run record keeps it as `params.effort` and the detail
+reads `using deepseek-v4-pro at high effort as read-only`. The catalogs themselves arrive in `GET /state` (`models`, `permissions`),
 cached for a minute because a model catalog can reach provider adapters. A deployment without one simply
 shows no model picker; a deployment without command service reports `commands-unavailable` instead of
 pretending the switch happened.
@@ -248,7 +258,7 @@ gets `403 cross-origin`. See [ADR 0010](adr/0010-origin-fence-trusts-the-request
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/task-center/api/state` | tasks, workspaces, presets, model and permission catalogs, capabilities, origin, version |
+| `GET` | `/task-center/api/state` | tasks, workspaces, presets, model catalog (with per-model efforts) and permission catalog, capabilities, origin, version |
 | `GET` | `/task-center/api/sessions?q=&limit=` | session rows for the target picker |
 | `GET` | `/task-center/api/worktree-options?workspaceId=` | base branches, when the worktree plugin is present |
 | `POST` | `/task-center/api/preview` | next five runs for an unsaved trigger |
@@ -368,7 +378,7 @@ npm test           # unit tests only
 | `test/core.test.mjs` | model normalisation, cron parsing, DST edges, occurrence counting |
 | `test/store.test.mjs` | atomic writes, corrupt-file quarantine, concurrent updates |
 | `test/scheduler.test.mjs` | arming, firing, missed runs, failure counting, DST |
-| `test/api.test.mjs` | every route against a real HTTP server, origin fence (including a proxied `Host`), rate limit, rotation |
+| `test/api.test.mjs` | every route against a real HTTP server, origin fence (including a proxied `Host`), catalogs and efforts, rate limit, rotation |
 | `test/events.test.mjs` | the source of every trigger kind, event shapes, the source on a stored record |
 | `test/tool.test.mjs` | the tool contract, target defaults, secret redaction |
 | `test/worktree.test.mjs` | the other plugin's HTTP contract against a stand-in server, and the failure codes |

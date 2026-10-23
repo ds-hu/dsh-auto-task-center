@@ -85,6 +85,11 @@ The pair is checked when the run fires, not when the task is saved: a model that
 **failure** (`model-unavailable`), never a quiet fallback to the default model, because the point of
 pinning one is that the run costs and reasons the way you decided.
 
+A model target may also carry a **reasoning effort** — one of the ids the model's catalog entry declares
+(`off`, `low`, `high`, …). It is not a label and not a free-form value: the panel only offers what that
+model advertises, and switching to a model that does not declare the chosen effort drops it rather than
+sending something the provider would reject. Absent means the model's own default effort.
+
 ## Permission target
 
 The **permission preset** a new session starts under — `read-only`, `workspace-write`,

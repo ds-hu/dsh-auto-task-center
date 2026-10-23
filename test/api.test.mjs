@@ -44,7 +44,15 @@ async function boot({ worktrees, bare = false } = {}) {
         return {
           default: { provider: 'deepseek', model: 'deepseek-chat' },
           groups: [
-            { id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat' }] },
+            {
+              id: 'deepseek',
+              name: 'DeepSeek',
+              models: [{
+                id: 'deepseek-chat',
+                name: 'DeepSeek Chat',
+                reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'high' },
+              }],
+            },
             { id: 'pi-ai', name: 'Pi', models: [{ id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash' }] },
           ],
         };
@@ -541,6 +549,9 @@ test('api: the panel state carries the model and permission catalogs', async () 
     assert.equal(state.body.capabilities.permissions, true);
     assert.deepEqual(state.body.models.options.map((row) => `${row.provider}/${row.model}`), ['deepseek/deepseek-chat', 'pi-ai/gemini-3.8-flash-high']);
     assert.deepEqual(state.body.models.default, { provider: 'deepseek', model: 'deepseek-chat' });
+    assert.deepEqual(state.body.models.options[0].efforts, [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }]);
+    assert.equal(state.body.models.options[0].defaultEffort, 'high');
+    assert.deepEqual(state.body.models.options[1].efforts, [], 'a model without reasoning declares no efforts');
     assert.deepEqual(state.body.permissions.options.map((row) => row.value), ['read-only', 'workspace-write', 'danger-full-access']);
     assert.equal(state.body.permissions.default, 'workspace-write');
   } finally {
@@ -556,6 +567,35 @@ test('api: a profile without the catalogs reports the capabilities as false', as
     assert.equal(state.body.capabilities.permissions, false);
     assert.deepEqual(state.body.models.options, []);
     assert.deepEqual(state.body.permissions.options, []);
+  } finally {
+    await harness.close();
+  }
+});
+
+test('api: a task keeps the reasoning effort it was saved with', async () => {
+  const harness = await boot();
+  try {
+    const created = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({
+        name: 'effort',
+        target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' } },
+      }),
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    assert.deepEqual(created.body.task.target.model, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'low' });
+    assert.match(created.body.task.targetSummary, /using deepseek-chat at low effort/u);
+
+    const state = await harness.call('/task-center/api/state');
+    const stored = state.body.tasks.find((task) => task.id === created.body.task.id);
+    assert.equal(stored.target.model.reasoningEffort, 'low');
+
+    const bad = await harness.call('/task-center/api/tasks', {
+      method: 'POST',
+      body: draft({ name: 'bad effort', target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'very high' } } }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.code, 'target/effort-invalid');
   } finally {
     await harness.close();
   }

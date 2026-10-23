@@ -357,6 +357,36 @@ test('model: stored targets keep a valid pair and drop a broken one', () => {
   assert.equal(broken.target.permission, undefined);
 });
 
+test('model: the reasoning effort is an id, and a stored one that is not is dropped', () => {
+  const task = normalizeDraft({
+    name: 'effort',
+    trigger: { kind: 'manual' },
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: ' high ' } },
+    message: { text: 'body' },
+  }, { nowMs: BASE });
+  assert.deepEqual(task.target.model, { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' });
+
+  for (const bad of ['high effort', 'high!', '-high', 'h'.repeat(65)]) {
+    assert.throws(
+      () => normalizeDraft({
+        name: 'effort',
+        trigger: { kind: 'manual' },
+        target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: bad } },
+        message: { text: 'body' },
+      }, { nowMs: BASE }),
+      (error) => error.code === 'target/effort-invalid',
+      bad,
+    );
+  }
+
+  const stored = sanitizeStoredTask({
+    ...task,
+    target: { kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'not a key' } },
+    updatedAt: new Date(BASE).toISOString(),
+  });
+  assert.deepEqual(stored.target.model, { provider: 'deepseek', model: 'deepseek-chat' }, 'the model survives, the effort does not');
+});
+
 test('model: the target summary names the model and the permission', () => {
   assert.equal(
     describeTarget({ kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat' } }),
@@ -369,5 +399,9 @@ test('model: the target summary names the model and the permission', () => {
   assert.equal(
     describeTarget({ kind: 'newSession', workspaceId: 'ws-1', permission: 'read-only' }),
     'new session in ws-1 (read-only)',
+  );
+  assert.equal(
+    describeTarget({ kind: 'newSession', workspaceId: 'ws-1', model: { provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'max' }, permission: 'read-only' }),
+    'new session in ws-1 using deepseek-chat at max effort (read-only)',
   );
 });
