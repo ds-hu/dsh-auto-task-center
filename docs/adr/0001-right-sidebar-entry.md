@@ -1,7 +1,7 @@
 # 1. Task Center is a right-sidebar tab, not a left-rail page
 
 Date: 2026-10-22
-Status: accepted
+Status: accepted — the surface set is extended by [ADR 11](0011-sidebar-page-entry.md)
 
 ## Context
 

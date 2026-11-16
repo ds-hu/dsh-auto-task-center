@@ -83,7 +83,7 @@ check('the tarball carries the legal and documentation files', () => {
 
 check('screenshots ship so the README images resolve on npm', () => {
   const shots = paths.filter((path) => path.startsWith('docs/screenshots/'));
-  // Four images is the whole set: entry, trigger, delivery, history.
+  // Six images: the page, the right-sidebar panel, trigger, delivery, manual, history.
   assert.ok(shots.length >= 4, `only ${shots.length} screenshots in the tarball`);
 });
 

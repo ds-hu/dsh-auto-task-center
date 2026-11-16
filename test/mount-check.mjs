@@ -95,10 +95,18 @@ check('every patch file listed in dsh.bundle.patch exists', () => {
   }
 });
 
-check('the web client entry is declared', () => {
+check('the web client entry is declared with both surfaces\' slot owners', () => {
   assert.equal(manifest.dsh?.client?.platform, 'web');
   assert.ok(Array.isArray(manifest.dsh?.client?.inject));
-  assert.ok(manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-sidebar-right'));
+  // The tab lives in ui-sidebar-right; the page is a main key and a
+  // sidebar.panellist row, declared by ui-layout and ui-sidebar.
+  for (const dependency of [
+    '@deepseek-ai/dsh-client-ui-sidebar-right',
+    '@deepseek-ai/dsh-client-ui-sidebar',
+    '@deepseek-ai/dsh-client-ui-layout',
+  ]) {
+    assert.ok(manifest.dsh.client.inject.includes(dependency), `${dependency} is missing from dsh.client.inject`);
+  }
 });
 
 check('every exports subpath resolves to a real file', () => {

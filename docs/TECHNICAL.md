@@ -4,6 +4,7 @@ Everything the README deliberately leaves out. Read this before changing schedul
 HTTP surface.
 
 - [Shape of the plugin](#shape-of-the-plugin)
+- [Client surfaces](#client-surfaces)
 - [Data model](#data-model)
 - [Scheduling](#scheduling)
 - [Delivery](#delivery)
@@ -28,7 +29,7 @@ independently, and because the tool half must also be mountable inside an agent 
 |---|---|---|---|
 | Host | `lib/index.js` (`dsh-auto-task-center`) | the profile patch | store, scheduler, HTTP routes |
 | Tools | `lib/tools.js` (`task-center-tools`) | the agent preset | registers `task_center` |
-| Client | `lib/client.js` | the web shell, via `dsh.client` | the right-sidebar tab |
+| Client | `lib/client.js` | the web shell, via `dsh.client` | the sidebar page and the right-sidebar tab |
 | Preset | `presets/task-center.patch.yml` | the profile patch | the 任务管理 agent preset |
 
 The two halves share one object through `lib/runtime.js`, a module-level singleton. `lib/index.js`
@@ -40,6 +41,30 @@ Nothing in `lib/` imports an `@deepseek-ai/*` module. A profile install resolves
 files plus the host's Cordis peer, so a Harness import would fail at load on a user's machine. The
 tool definition in `lib/tool-definition.js` is a hand-built `ToolDefinition` object for the same reason:
 `defineTool` lives in a package this one cannot depend on. `test/client-smoke.mjs` enforces the rule.
+
+## Client surfaces
+
+The client half registers two surfaces over one component tree:
+
+| Surface | Registration | Id / key | Purpose |
+|---|---|---|---|
+| Page | `main` keyed slot + `sidebar.panellist` list row | `task-center`, order `15` | global management page |
+| Tab | `sidebarRightTabs` definition + the two `sidebar.right.pane.tab*` seats | `@ds-hu/dsh-auto-task-center/tasks` | per-session panel |
+
+The two ids are separate on purpose: ui-layout keeps a panel id only while a `main` slot with the same key
+is registered, and the right-sidebar tab is addressed by its tab-type id. The sidebar row's `order: 15`
+puts it directly under **Automation tasks** (order `10`) and above **MCP Manager** (order `20`); its label
+comes from `nav.label` in both dictionaries. The icon is the same list-and-clock glyph as the tab guide.
+
+`TaskCenter` owns the state — the `/task-center/api/state` poll, the search and filter, and the draft —
+and takes one `page` prop. Without it the component is the right-sidebar panel, unchanged. With it the same
+markup becomes the page: a title bar, one filter row, and a grid with the list on the left and the editor on
+the right. The list keeps rendering while a task is edited, the edited row is marked `aria-current`, and
+under 900px CSS hides the list while the detail is open so the page degrades to the panel's single column.
+Both surfaces share one stylesheet, `@ds-hu/dsh-auto-task-center/panel.css`.
+
+Disposal closes only the right-sidebar tabs this page opened; Cordis removes the slot registrations with the
+bundle. `test/client-smoke.mjs` asserts the id parity, the ordering contract, and the dictionary labels.
 
 ## Data model
 
@@ -385,7 +410,7 @@ npm test           # unit tests only
 | `test/core.test.mjs` (model cases) | model/permission validation, stored-target sanitising, summaries |
 | `test/lifecycle.test.mjs` | mount/dispose leaves the disk untouched; the CLI's purge guards |
 | `test/mount-check.mjs` | package shape, Loader row ids, preset drift against `standard` |
-| `test/client-smoke.mjs` | the browser bundle evaluated against a mock context, theme-only colours |
+| `test/client-smoke.mjs` | the browser bundle evaluated against a mock context: both surfaces' registrations, locale parity, theme-only colours |
 | `test/package.mjs` | what `npm publish` would actually upload |
 
 `test/e2e/worktree.mjs` is a manual check, run against a live instance that mounts both this plugin

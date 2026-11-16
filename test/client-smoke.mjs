@@ -4,8 +4,9 @@
  *
  * The client half is a hand-written `window.__ModuleLoader__` script that no
  * bundler ever checks, so this script is its compiler: it runs the real file,
- * calls the real `apply`, and asserts that the registrations the sidebar needs
- * were actually made — the tab type, the guide entry, both slots, the locale
+ * calls the real `apply`, and asserts that the registrations the shell needs
+ * were actually made — the right-sidebar tab type and its two seats, the global
+ * sidebar row and the main page it opens, the guide entry, the locale
  * dictionaries and the stylesheet.
  *
  * It also guards the packaging rule that matters most: neither half may import
@@ -209,12 +210,28 @@ await check('the right-sidebar tab type is registered with a guide entry', () =>
 });
 
 await check('the tab body and its title are registered in the sidebar slots', () => {
-  const names = loaded.log.slots.map((slot) => slot.name).sort();
-  assert.deepEqual(names, ['sidebar.right.pane.tab', 'sidebar.right.pane.tab.title']);
-  for (const slot of loaded.log.slots) {
+  const rightPane = loaded.log.slots.filter((slot) => slot.name.startsWith('sidebar.right.pane.'));
+  assert.deepEqual(rightPane.map((slot) => slot.name).sort(), ['sidebar.right.pane.tab', 'sidebar.right.pane.tab.title']);
+  for (const slot of rightPane) {
     assert.equal(slot.key, '@ds-hu/dsh-auto-task-center/tasks');
     assert.equal(slot.locale, 'taskCenter');
   }
+});
+
+await check('the global sidebar row and its main page share one id', () => {
+  const entry = loaded.log.slots.find((slot) => slot.name === 'sidebar.panellist');
+  const page = loaded.log.slots.find((slot) => slot.name === 'main');
+  assert.ok(entry, 'sidebar.panellist is not registered');
+  assert.ok(page, 'main is not registered');
+  assert.equal(entry.id, 'task-center');
+  assert.equal(page.key, entry.id);
+  assert.equal(entry.locale, 'taskCenter');
+  assert.equal(page.locale, 'taskCenter');
+  // Directly under 自动化任务 (order 10), above any later panel.
+  assert.equal(entry.order, 15);
+  assert.equal(typeof entry.label, 'function');
+  assert.equal(entry.label(), '任务中心');
+  assert.equal(typeof loaded.exports.__tcTest.TaskCenterPage, 'function');
 });
 
 await check('exactly one owned stylesheet is attached and it is removable', () => {
@@ -224,6 +241,7 @@ await check('exactly one owned stylesheet is attached and it is removable', () =
   assert.equal(tag.dataset.pluginCss, '@ds-hu/dsh-auto-task-center/panel.css');
   assert.equal(tag.dataset.plugin, '@ds-hu/dsh-auto-task-center');
   assert.match(tag.textContent, /\.tc-root/u);
+  assert.match(tag.textContent, /\.tc-page/u);
   for (const dispose of loaded.disposers) {
     try {
       dispose();

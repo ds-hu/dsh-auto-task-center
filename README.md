@@ -15,11 +15,19 @@ Add a task once, and DSH opens a session or messages an existing one when the ta
 
 ---
 
-## A tab, right where you work
+## A page, and a tab where you work
 
-Task Center is a tab in the session's right sidebar: no new window, no separate app.
+Task Center has two ways in. **Task Center** in the left sidebar — a peer of **Automation tasks** — opens
+the management page: the task list on the left, the editor beside it. Inside a session, the right sidebar
+still has a **Tasks** tab, so a task can be written without leaving the conversation. Both surfaces read the
+same Host-wide list, so a change on one is a change on the other.
+
 Every row answers three questions at a glance — is it on, when does it fire next, where does it deliver.
 A disabled task stays in the list with its settings and history intact.
+
+<p align="center">
+  <img src="docs/screenshots/06-page.png" alt="Task Center in the left sidebar: the task list on the left and the selected task's editor on the right" width="820">
+</p>
 
 ## One task, one source
 
@@ -101,8 +109,8 @@ The panel borrows DSH's theme tokens, so it looks native in light and dark alike
 dsh plugin --profile web add @ds-hu/dsh-auto-task-center
 ```
 
-Restart `dsh web`, open any session, and pick **Task Center** from the right sidebar's start page.
-The **任务管理** preset shows up in the composer's mode menu.
+Restart `dsh web`, then pick **Task Center** in the left sidebar — directly under *Automation tasks* — or
+open the same tab from any session's right sidebar. The **任务管理** preset shows up in the composer's mode menu.
 
 Behind a reverse proxy, a tunnel, or Cloudflare Access, the panel keeps working: a write is checked against the
 host your browser actually used, not the loopback address DSH bound.

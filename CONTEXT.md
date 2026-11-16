@@ -135,6 +135,16 @@ where the task runs.
 
 ## Panel
 
-The right-sidebar tab, and the only surface where tasks are edited by hand. The **list view** shows every
-task with its state; the **detail view** edits one, in five collapsible sections — basics, trigger,
-delivery, webhook, run history.
+The per-session surface: a tab in the session's right sidebar. It shows the same list and detail views as
+the **Page**, scoped to the conversation the reader is in.
+
+## Page
+
+The global surface: the **Task Center** row in the left sidebar, a peer of **Automation tasks**, opening a
+full main-column page. The page keeps the **list view** on the left and the **detail view** on the right, so
+one task can be inspected while another is chosen; on a narrow window the detail replaces the list instead.
+The page is not tied to a session — tasks are Host-wide, and this is the surface for managing them without
+opening a conversation.
+
+Both surfaces read the same list and share one editor. The **list view** shows every task with its state; the
+**detail view** edits one, in five collapsible sections — basics, trigger, delivery, webhook, run history.
